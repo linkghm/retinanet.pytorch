@@ -1,13 +1,13 @@
 import os
 
-root = os.path.join('data', 'VOC2012')
-image_dir = os.path.join(root, 'JPEGImages')
-annotation_dir = os.path.join(root, 'Annotations')
-train_imageset_fn = os.path.join(root, 'ImageSets', 'Main', 'trainval.txt')
-val_imageset_fn = os.path.join(root, 'ImageSets', 'Main', 'val.txt')
+root = os.path.join('/media/hayden/Storage21/DATASETS/IMAGE/VOC', '2012')
+image_dir = os.path.join(root, 'IMAGES')
+annotation_dir = os.path.join(root, 'ANNOTATIONS', 'XML')
+train_imageset_fn = os.path.join(root, 'SPLITS', 'Main', 'trainval.txt')
+val_imageset_fn = os.path.join(root, 'SPLITS', 'Main', 'val.txt')
 image_ext = '.jpg'
 
-backbone = 'resnet101'
+backbone = 'resnet50'
 classes = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable',
            'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
 mean, std = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
