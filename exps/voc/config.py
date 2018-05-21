@@ -1,10 +1,10 @@
 import os
 
-root = os.path.join('/media/hayden/Storage21/DATASETS/IMAGE/VOC', '2012')
-image_dir = os.path.join(root, 'IMAGES')
-annotation_dir = os.path.join(root, 'ANNOTATIONS', 'XML')
-train_imageset_fn = os.path.join(root, 'SPLITS', 'Main', 'trainval.txt')
-val_imageset_fn = os.path.join(root, 'SPLITS', 'Main', 'val.txt')
+root = os.path.join('/media/hayden/Storage21/DATASETS/IMAGE/VOC')
+image_dir = os.path.join(root, 'IMAGES', '2012')
+annotation_dir = os.path.join(root, 'ANNOTATIONS', '2012', 'XML')
+train_imageset_fn = os.path.join(root, 'SPLITS', '2012', 'Main', 'trainval.txt')
+val_imageset_fn = os.path.join(root, 'SPLITS', '2012', 'Main', 'val.txt')
 image_ext = '.jpg'
 
 backbone = 'resnet50'

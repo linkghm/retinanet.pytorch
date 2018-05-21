@@ -2,6 +2,8 @@ import torch
 from math import sqrt
 from utils import box_iou, box_nms, change_box_order, meshgrid
 
+from torch.autograd import Variable
+
 
 class DataEncoder:
     def __init__(self):
@@ -74,7 +76,8 @@ class DataEncoder:
         else:
             input_size = torch.Tensor(input_size)
 
-        anchor_boxes = self.get_anchor_boxes(input_size)
+        # anchor_boxes = self.get_anchor_boxes(input_size)
+        anchor_boxes = Variable(self.get_anchor_boxes(input_size).cuda())
         loc_xy = loc_preds[:, :2]
         loc_wh = loc_preds[:, 2:]
         xy = loc_xy * anchor_boxes[:, 2:] + anchor_boxes[:, :2]
@@ -85,5 +88,8 @@ class DataEncoder:
         score, labels = cls_preds.max(1)
         ids = (score > CLS_THRESH) & (labels > 0)
         ids = ids.nonzero().squeeze()
-        keep = box_nms(boxes[ids], score[ids], threshold=NMS_THRESH)
-        return boxes[ids][keep], labels[ids][keep]
+        if len(ids) > 0:
+            keep = box_nms(boxes[ids], score[ids], threshold=NMS_THRESH)
+            return boxes[ids][keep], labels[ids][keep]
+        else:
+            return None, None
