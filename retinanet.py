@@ -95,12 +95,15 @@ class RetinaNet(nn.Module):
         'resnet152': resnet152
     }
 
-    def __init__(self, backbone='resnet101', num_classes=20, pretrained=True):
+    def __init__(self, backbone='resnet101', num_classes=20, pretrained=True, emb_size=None):
         super(RetinaNet, self).__init__()
         self.resnet = RetinaNet.backbones[backbone](pretrained=pretrained)
         self.feature_pyramid = FeaturePyramid(self.resnet)
         self.subnet_boxes = SubNet(4)
-        self.subnet_classes = SubNet(num_classes + 1)
+        if emb_size is None:
+            self.subnet_classes = SubNet(num_classes + 1)
+        else:
+            self.subnet_classes = SubNet(emb_size)
 
     def forward(self, x):
         pyramid_features = self.feature_pyramid(x)

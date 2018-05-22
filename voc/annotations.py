@@ -22,6 +22,7 @@ class AnnotationDir:
 
     def build_annotations(self):
         box_dict = {}
+        self.classes_samples = {}
         if self.fmt == 'voc':
             for fn in self.filenames:
                 boxes = []
@@ -42,6 +43,10 @@ class AnnotationDir:
                     bottom = int(box_tag.find('ymax').text)
                     
                     box = BoundingBox(left, top, right, bottom, image_width, image_height, self.labels.index(label))
+                    if self.labels.index(label) not in self.classes_samples:
+                        self.classes_samples[self.labels.index(label)] = set([os.path.splitext(fn)[0]])
+                    else:
+                        self.classes_samples[self.labels.index(label)].add(os.path.splitext(fn)[0])
                     boxes.append(box)
                 if len(boxes) > 0:
                     box_dict[os.path.splitext(fn)[0]] = boxes
@@ -51,3 +56,4 @@ class AnnotationDir:
 
     def get_boxes(self, fn):
         return self.ann_dict[fn]
+

@@ -45,12 +45,34 @@ class DataEncoder:
             boxes.append(box.view(-1, 4))
         return torch.cat(boxes, 0)
 
-    def encode(self, boxes, labels, input_size):
+    # def encode(self, boxes, labels, input_size):
+    #     if isinstance(input_size, int):
+    #         input_size = torch.Tensor([input_size, input_size])
+    #     else:
+    #         input_size = torch.Tensor(input_size)
+    #
+    #     anchor_boxes = self.get_anchor_boxes(input_size)
+    #     boxes = change_box_order(boxes, 'xyxy2xywh')
+    #     boxes = boxes.float()
+    #     ious = box_iou(anchor_boxes, boxes, order='xywh')
+    #     max_ious, max_ids = ious.max(1)
+    #     boxes = boxes[max_ids]
+    #
+    #     loc_xy = (boxes[:, :2] - anchor_boxes[:, :2]) / anchor_boxes[:, 2:]
+    #     loc_wh = torch.log(boxes[:, 2:] / anchor_boxes[:, 2:])
+    #     loc_targets = torch.cat([loc_xy, loc_wh], 1)
+    #
+    #     cls_targets = 1 + labels[max_ids]
+    #     cls_targets[max_ious < 0.4] = 0
+    #     cls_targets[(max_ious >= 0.4) & (max_ious < 0.5)] = -1
+    #     return loc_targets, cls_targets
+
+    def encode(self, boxes, labels, input_size, desired_label=None):
         if isinstance(input_size, int):
             input_size = torch.Tensor([input_size, input_size])
         else:
             input_size = torch.Tensor(input_size)
-        
+
         anchor_boxes = self.get_anchor_boxes(input_size)
         boxes = change_box_order(boxes, 'xyxy2xywh')
         boxes = boxes.float()
@@ -63,8 +85,11 @@ class DataEncoder:
         loc_targets = torch.cat([loc_xy, loc_wh], 1)
 
         cls_targets = 1 + labels[max_ids]
-        cls_targets[max_ious < 0.4] = 0
-        cls_targets[(max_ious >= 0.4) & (max_ious < 0.5)] = -1
+        cls_targets[max_ious < 0.4] = 0  # set other flag if overlap of anchor with GT is < 40%
+        cls_targets[(max_ious >= 0.4) & (max_ious < 0.5)] = -1  # set ignore flag if overlap is between 40% and 50%
+
+        cls_targets[labels[max_ids] != desired_label] = -1  # set ignore flag if this isn't the label we are looking for
+
         return loc_targets, cls_targets
 
     def decode(self, loc_preds, cls_preds, input_size):
