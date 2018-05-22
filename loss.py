@@ -68,6 +68,7 @@ class ProtosLoss(nn.Module):
         :return:
         """
         self.s_count = 0  # use this to know what sample we are up to for sup/query eval
+        self.q_count = 0  # use this to know what sample we are up to for sup/query eval
         # self.protos = torch.zeros(n_way, emb_size).long().cuda()  # this stores our proto sums, will be avgd after all support done
         self.supports = Variable(torch.zeros(self.n_way, self.n_support, self.emb_size).float().cuda(), requires_grad=False)  # this stores our supports, rather than summing we hold for 'other' bound calcs
         self.proto_bounds = Variable(torch.zeros(self.n_way), requires_grad=False)
@@ -86,16 +87,26 @@ class ProtosLoss(nn.Module):
         return torch.pow(x - y, 2).sum(2)
 
     def proto_loss(self, x, y):
-        t = y.max()
-        tt = y.sum()
-        # calc dists between every 'other' and protos
-        dists = self.euclidean_dist(x, self.protos)
-        print('d')
-        # calc loss of the others based on the distance, need to weight down as lots of others (focal loss)
-        # calc dist between (x mean on target class) or (all x) and all protos (dists)
-        # calc loss and classes from these dists
-        # return loss and preds, loss to be summed and avgd for episode back in training function
+        when_avg = False  # when to apply avg, default is false, there is a difference in the values of these losses, think more about it
 
+        pos = y > 0  # all of the positions of the classes for this query sample
+        num_pos = pos.data.long().sum()  # number of positive anchors that match the class in this query sample
+
+        if when_avg:
+            # calc dists between every 'other' and protos
+            dists = self.euclidean_dist(x, self.protos)
+            log_p_y = F.log_softmax(-dists)
+
+            # this gets the loss by averaging the pos softmax's per class and then taking the appropriate gt class indx
+            # here we do the mean on the SMs after distance calc
+            loss = -log_p_y[pos.unsqueeze(1)].view(-1, self.n_way).mean(0)[int(self.q_count / self.n_query)]
+        else:
+            # here we do the mean of the query embeddings then the distance calc
+            mean_query_anchs = x[pos.unsqueeze(1)].view(-1, self.emb_size).mean(0)
+            dists2 = self.euclidean_dist(mean_query_anchs.unsqueeze(0), self.protos)
+            log_p_y = F.log_softmax(-dists2)
+            loss = -log_p_y.squeeze()[int(self.q_count / self.n_query)]
+        print('d')
 
         # y = one_hot(y.cpu(), x.size(-1)).cuda()
         # logit = F.softmax(x)
@@ -104,7 +115,7 @@ class ProtosLoss(nn.Module):
         #
         # loss = -1 * y.float() * torch.log(logit)
         # loss = loss * (1 - logit) ** 2
-        return 1#loss.sum()
+        return loss#loss.sum()
 
     def forward(self, loc_preds, loc_targets, cls_preds, cls_targets):
         print(self.s_count)
@@ -114,11 +125,6 @@ class ProtosLoss(nn.Module):
         num_pos = pos.data.long().sum()  # the number of gt anchors for the class/es we interested in for a single input image
 
         # if support hold data for mean in memory and have to hold queries too? no we need to pass all support first hold them then queries one by one to calc loss
-
-        # mask = pos.unsqueeze(2).expand_as(loc_preds)  # mask 'other' and 'ignore' boxes out to not affect
-        # masked_loc_preds = loc_preds[mask].view(-1, 4)
-        # masked_loc_targets = loc_targets[mask].view(-1, 4)
-        # loc_loss = F.smooth_l1_loss(masked_loc_preds, masked_loc_targets, size_average=False)
 
         if self.s_count < self.n_support * self.n_way:  # is support sample
             # mask out 'ignore' and 'other' boxes to not affect
@@ -141,22 +147,30 @@ class ProtosLoss(nn.Module):
             # when building the support / protos mem we have no loss
             cls_loss = 0 #TODO change to a tensor of zeros -- Variable(torch.zeros(1).float().cuda(), requires_grad=False)
             loc_loss = 0
+            self.s_count += 1
         else:
-            if self.s_count == self.n_support*self.n_way:  # is first query sample, we need to mean the protos
+            if self.q_count == 0:  # is first query sample, we need to mean the protos, and create the bounds
                 self.protos = self.supports.mean(1)
                 for i in range(self.n_way):
                     self.proto_bounds[i] = self.euclidean_dist(self.supports[i], self.protos[i].unsqueeze(0)).max().data
+
+            mask = pos.unsqueeze(2).expand_as(loc_preds)  # mask 'other' and 'ignore' boxes out to not affect
+            masked_loc_preds = loc_preds[mask].view(-1, 4)
+            masked_loc_targets = loc_targets[mask].view(-1, 4)
+            loc_loss = F.smooth_l1_loss(masked_loc_preds, masked_loc_targets, size_average=False)
+
 
             pos_neg = cls_targets > -1  # mask out 'ignore' boxes to not affect
             mask = pos_neg.unsqueeze(2).expand_as(cls_preds)
             masked_cls_preds = cls_preds[mask].view(-1, self.emb_size)
             cls_loss = self.proto_loss(masked_cls_preds, cls_targets[pos_neg])
+            self.q_count += 1
 
-        self.s_count += 1
-        # # print('loc_loss: %.3f | cls_loss: %.3f' % (loc_loss.data[0] / num_pos, cls_loss.data[0] / num_pos),
-        # #       end=' | ')
-        # if num_pos > 0:
-        #     loss = (loc_loss + cls_loss) / num_pos
-        # else:
-        loss = 0
+        if num_pos > 0:
+            loss = cls_loss + (loc_loss / num_pos)
+            # print('loc_loss: %.3f | cls_loss: %.3f' % (loc_loss.data[0] / num_pos, cls_loss.data[0]),
+            print('loc_loss: %.3f | cls_loss: %.3f' % (loc_loss / num_pos, cls_loss),
+                  end=' | ')
+        else:
+            loss = 0
         return loss
