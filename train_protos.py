@@ -4,6 +4,7 @@ import sys
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
+from sklearn.manifold import TSNE
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -47,15 +48,19 @@ val_transform = transforms.Compose([
     transforms.Normalize(cfg.mean, cfg.std)
 ])
 
+n_way=5
+n_support=5
+n_query=2
+emb_size=128
 # Load the sets, and loaders
 trainset = VocLikeProtosDataset(image_dir=cfg.image_dir,
                                 annotation_dir=cfg.annotation_dir,
                                 imageset_fn=cfg.train_imageset_fn,
                                 image_ext=cfg.image_ext,
                                 classes=cfg.classes,
-                                n_way=5,
-                                n_support=10,
-                                n_query=5,
+                                n_way=n_way,
+                                n_support=n_support,
+                                n_query=n_query,
                                 encoder=DataEncoder(),
                                 transform=train_transform)
 # trainset = VocLikeDataset(image_dir=cfg.image_dir, annotation_dir=cfg.annotation_dir, imageset_fn=cfg.train_imageset_fn,
@@ -91,10 +96,10 @@ cudnn.benchmark = True
 
 # Setup loss and optimizer
 # criterion = FocalLoss(len(cfg.classes))
-criterion = ProtosLoss(n_way=5,
-                       n_support=10,
-                       n_query=5,
-                       emb_size=128)
+criterion = ProtosLoss(n_way=n_way,
+                       n_support=n_support,
+                       n_query=n_query,
+                       emb_size=emb_size)
 optimizer = optim.SGD(net.parameters(), lr=lr, momentum=cfg.momentum, weight_decay=cfg.weight_decay)
 
 # def train(epoch):
@@ -122,7 +127,9 @@ def train(episode):
     net.train()
     # trainset.generate_episode()
     loss = 0
+    clss = []
     optimizer.zero_grad()
+    criterion.reset()
     # for sample_idx, (input, loc_target, cls_target) in enumerate(trainset.load_episode()):  # do samples 1 by 1, we will accumulate for loss
     inputs, loc_targets, cls_targets = trainset.load_episode()
     for sid in range(inputs.size()[0]):  # do samples 1 by 1, we will accumulate for loss
@@ -132,14 +139,33 @@ def train(episode):
         loc_target = Variable(loc_targets[sid].unsqueeze(0).cuda())
         cls_target = Variable(cls_targets[sid].unsqueeze(0).cuda())
 
-        loc_pred, cls_pred = net(input)
+        loc_pred, cls_pred = net(input) # this builds mem on querys as we store for loss tracing the path to the loss?
 
-        loss = criterion(loc_pred, loc_target, cls_pred, cls_target)
+        loc_loss, cls_loss = criterion(loc_pred, loc_target, cls_pred, cls_target)
+        if sid >= n_way*n_support:
+            loss += loc_loss + cls_loss
+            print('loc_loss: %.3f | cls_loss: %.3f | tot_loss: %.3f' % (loc_loss, cls_loss, loss))
+            print(sid)
+        else:
+            clss.append(int(sid/n_support))
 
     loss.backward()
     nn.utils.clip_grad_norm(net.parameters(), max_norm=1.2)
     optimizer.step()
 
+    sups = criterion.supports.cpu().data.numpy().reshape((n_support*n_way, emb_size))
+    tsne = TSNE(n_components=2, verbose=1, perplexity=40, n_iter=300)
+    tsne_results = tsne.fit_transform(sups)
+
+    from matplotlib import pyplot as plt
+    plt.figure(figsize=(6, 5))
+    colors = 'r', 'g', 'b', 'c', 'm', 'y', 'k', 'w', 'orange', 'purple'
+    for i, label in enumerate(clss):
+        plt.scatter(tsne_results[i,0], tsne_results[i,1], c=colors[label], label=label)
+    # plt.legend()
+    # plt.show()
+    plt.savefig('/media/hayden/Storage21/MODELS/PROTINANET/vis/'+str(episode)+'.png')
+    # plt.savefig('/media/hayden/Storage21/MODELS/PROTINANET/vis/'+str(episode)+'.pdf')
     # train_loss += loss.data[0]
     # print('train_loss: %.3f | avg_loss: %.3f' % (loss.data[0], train_loss / (batch_idx + 1)))
     # save_checkpoint(train_loss, len(trainloader))

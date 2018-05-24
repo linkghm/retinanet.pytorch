@@ -91,7 +91,8 @@ class ProtosLoss(nn.Module):
 
         pos = y > 0  # all of the positions of the classes for this query sample
         num_pos = pos.data.long().sum()  # number of positive anchors that match the class in this query sample
-
+        if num_pos <= 0:
+            return 0
         if when_avg:
             # calc dists between every 'other' and protos
             dists = self.euclidean_dist(x, self.protos)
@@ -106,7 +107,6 @@ class ProtosLoss(nn.Module):
             dists2 = self.euclidean_dist(mean_query_anchs.unsqueeze(0), self.protos)
             log_p_y = F.log_softmax(-dists2)
             loss = -log_p_y.squeeze()[int(self.q_count / self.n_query)]
-        print('d')
 
         # y = one_hot(y.cpu(), x.size(-1)).cuda()
         # logit = F.softmax(x)
@@ -118,15 +118,13 @@ class ProtosLoss(nn.Module):
         return loss#loss.sum()
 
     def forward(self, loc_preds, loc_targets, cls_preds, cls_targets):
-        print(self.s_count)
-
         batch_size, num_boxes = cls_targets.size()
         pos = cls_targets > 0
         num_pos = pos.data.long().sum()  # the number of gt anchors for the class/es we interested in for a single input image
 
-        # if support hold data for mean in memory and have to hold queries too? no we need to pass all support first hold them then queries one by one to calc loss
+        # is support sample
+        if self.s_count < self.n_support * self.n_way:
 
-        if self.s_count < self.n_support * self.n_way:  # is support sample
             # mask out 'ignore' and 'other' boxes to not affect
             if num_pos > 0:  # todo no samples in this.. take avg of prev or keep as 0s or dont avg over boxes per img but fill sup until filled then skip
                 mask = pos.unsqueeze(2).expand_as(cls_preds)
@@ -148,7 +146,7 @@ class ProtosLoss(nn.Module):
             cls_loss = 0 #TODO change to a tensor of zeros -- Variable(torch.zeros(1).float().cuda(), requires_grad=False)
             loc_loss = 0
             self.s_count += 1
-        else:
+        else:  # is query sample
             if self.q_count == 0:  # is first query sample, we need to mean the protos, and create the bounds
                 self.protos = self.supports.mean(1)
                 for i in range(self.n_way):
@@ -167,10 +165,9 @@ class ProtosLoss(nn.Module):
             self.q_count += 1
 
         if num_pos > 0:
-            loss = cls_loss + (loc_loss / num_pos)
+            return (loc_loss / num_pos), (cls_loss/ num_pos)
             # print('loc_loss: %.3f | cls_loss: %.3f' % (loc_loss.data[0] / num_pos, cls_loss.data[0]),
-            print('loc_loss: %.3f | cls_loss: %.3f' % (loc_loss / num_pos, cls_loss),
-                  end=' | ')
+            # print('loc_loss: %.3f | cls_loss: %.3f' % (loc_loss / num_pos, cls_loss),
+            #       end=' | ')
         else:
-            loss = 0
-        return loss
+            return 0, 0

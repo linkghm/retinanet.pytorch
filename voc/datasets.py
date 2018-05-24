@@ -163,7 +163,7 @@ class VocLikeProtosDataset(Dataset):
             imh, imw = im.size(1), im.size(2)
             inputs[i, :, :imh, :imw] = im
 
-            loc_target, cls_target = self.encoder.encode(boxes[i], labels[i], input_size=(max_w, max_h),
+            loc_target, cls_target = self.encoder.encode_protos(boxes[i], labels[i], input_size=(max_w, max_h),
                                                          desired_label=desired_classes[i])
             loc_targets.append(loc_target)
             cls_targets.append(cls_target)
