@@ -92,7 +92,7 @@ class ProtosLoss(nn.Module):
         pos = y > 0  # all of the positions of the classes for this query sample
         num_pos = pos.data.long().sum()  # number of positive anchors that match the class in this query sample
         if num_pos <= 0:
-            return 0
+            return 0, None, 0
         if when_avg:
             # calc dists between every 'other' and protos
             dists = self.euclidean_dist(x, self.protos)
@@ -103,11 +103,17 @@ class ProtosLoss(nn.Module):
             loss = -log_p_y[pos.unsqueeze(1)].view(-1, self.n_way).mean(0)[int(self.q_count / self.n_query)]
         else:
             # here we do the mean of the query embeddings then the distance calc
-            mean_query_anchs = x[pos.unsqueeze(1)].view(-1, self.emb_size).mean(0)
+            mean_query_anchs = x[pos.unsqueeze(1)].view(-1, self.emb_size)[0]#.mean(0) # take mean or just one anchor
+            vectors = mean_query_anchs
             dists2 = self.euclidean_dist(mean_query_anchs.unsqueeze(0), self.protos)
             log_p_y = F.log_softmax(-dists2)
-            loss = -log_p_y.squeeze()[int(self.q_count / self.n_query)]
+            i = Variable(torch.zeros(self.n_way), requires_grad=False).cuda()
+            i[(int(self.q_count / self.n_query))]=1
+            loss = (-log_p_y.squeeze()*i).sum() # todo these indecies might not allow loss to flow correctly as not torch vars
 
+        _, y_hat = log_p_y.max(1)
+        _, yb = i.max(0)
+        acc_val = torch.eq(y_hat, yb).float().mean()
         # y = one_hot(y.cpu(), x.size(-1)).cuda()
         # logit = F.softmax(x)
         # # logit = F.sigmoid(x)
@@ -115,9 +121,10 @@ class ProtosLoss(nn.Module):
         #
         # loss = -1 * y.float() * torch.log(logit)
         # loss = loss * (1 - logit) ** 2
-        return loss#loss.sum()
+        return loss, vectors, acc_val#loss.sum()
 
     def forward(self, loc_preds, loc_targets, cls_preds, cls_targets):
+
         batch_size, num_boxes = cls_targets.size()
         pos = cls_targets > 0
         num_pos = pos.data.long().sum()  # the number of gt anchors for the class/es we interested in for a single input image
@@ -131,20 +138,23 @@ class ProtosLoss(nn.Module):
                 masked_cls_preds = cls_preds[mask].view(-1, self.emb_size)
 
                 # get mean of all boxes in this image to add as a support example
-                support = masked_cls_preds.mean(0)
+                support = masked_cls_preds[0]#.mean(0) #mean or first element
                 self.supports[int(self.s_count / self.n_support), self.s_count % self.n_support] = support.data
             else:
 
                 if self.s_count % self.n_support > 0:
                     # take mean of already passed vectors
-                    sd = self.supports[int(self.s_count / self.n_support), :self.s_count % self.n_support].mean(0).data
-                    self.supports[int(self.s_count / self.n_support), self.s_count % self.n_support] = sd
+                    support = self.supports[int(self.s_count / self.n_support), :self.s_count % self.n_support][0].data#.mean(0).data # mean or first element
+                    self.supports[int(self.s_count / self.n_support), self.s_count % self.n_support] = support
                 else:
                     pass # have to leave as 0s for now
                 print("not enough samples : class %d" % (int(self.s_count / self.n_support)))
+
             # when building the support / protos mem we have no loss
             cls_loss = 0 #TODO change to a tensor of zeros -- Variable(torch.zeros(1).float().cuda(), requires_grad=False)
             loc_loss = 0
+            acc = 0
+            vector = self.supports[int(self.s_count / self.n_support), self.s_count % self.n_support]
             self.s_count += 1
         else:  # is query sample
             if self.q_count == 0:  # is first query sample, we need to mean the protos, and create the bounds
@@ -161,13 +171,13 @@ class ProtosLoss(nn.Module):
             pos_neg = cls_targets > -1  # mask out 'ignore' boxes to not affect
             mask = pos_neg.unsqueeze(2).expand_as(cls_preds)
             masked_cls_preds = cls_preds[mask].view(-1, self.emb_size)
-            cls_loss = self.proto_loss(masked_cls_preds, cls_targets[pos_neg])
+            cls_loss, vector, acc = self.proto_loss(masked_cls_preds, cls_targets[pos_neg])
             self.q_count += 1
 
         if num_pos > 0:
-            return (loc_loss / num_pos), (cls_loss/ num_pos)
+            return (loc_loss / num_pos), (cls_loss/ num_pos), acc, vector
             # print('loc_loss: %.3f | cls_loss: %.3f' % (loc_loss.data[0] / num_pos, cls_loss.data[0]),
             # print('loc_loss: %.3f | cls_loss: %.3f' % (loc_loss / num_pos, cls_loss),
             #       end=' | ')
         else:
-            return 0, 0
+            return 0, 0, 0, None

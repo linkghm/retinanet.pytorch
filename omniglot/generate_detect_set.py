@@ -93,6 +93,26 @@ def apply_noise(noise_typ,image):
         noisy = image * gauss
         return noisy.squeeze()
 
+def crop_char(img, pad=2):
+    itemindex = np.where(img == 0)
+    min_x = max(min(itemindex[1])-pad, 0)
+    max_x = min(max(itemindex[1])+pad, img.shape[0])
+    min_y = max(min(itemindex[0])-pad, 0)
+    max_y = min(max(itemindex[0])+pad, img.shape[1])
+    middle_x = int((min_x+max_x)/2)
+    middle_y = int((min_y+max_y)/2)
+    w = max_x - min_x
+    h = max_y - min_y
+    size = max(w, h)
+    l = middle_x - int(size/2)
+    r = middle_x + int(size/2)
+    t = middle_y - int(size/2)
+    b = middle_y + int(size/2)
+
+    img = img[t:b, l:r]
+    return img
+
+
 def get_rand_pos(img_size, char_size, precovered=[set([]), set([])]):
     # coords of tl placement
     possible_x = set(range(img_size[0]))
@@ -118,11 +138,13 @@ def get_rand_pos(img_size, char_size, precovered=[set([]), set([])]):
     x = None
     y = None
     for xt in possible_x:
-        if xt + char_size[0] not in precovered[0]:
+        if not set(range(xt, xt+char_size[0])) & precovered[0]:
+        # if xt not in precovered[0] and xt + char_size[0] not in precovered[0]:
             x = xt
             break
     for yt in possible_y:
-        if yt + char_size[1] not in precovered[1]:
+        if not set(range(yt, yt+char_size[1])) & precovered[1]:
+        # if yt not in precovered[1] and yt + char_size[1] not in precovered[1]:
             y = yt
             break
 
@@ -168,7 +190,7 @@ CLS_PER_IMG = 3
 chars = load_images('val')
 n_characters = len(chars)
 
-for char_ind in range(n_characters):
+for char_ind in tqdm(range(n_characters)):
     for sample_ind in range(len(chars[char_ind])):
 
         time.sleep(2)
@@ -177,6 +199,8 @@ for char_ind in range(n_characters):
 
         # apply first character we are interested in
         img = chars[char_ind][sample_ind]
+
+        img = crop_char(img)
         while True:
             scl = random.uniform(CHAR_SCALES[0],CHAR_SCALES[1])
             imgb = transform.rescale(img, scl, mode='reflect')
@@ -192,9 +216,10 @@ for char_ind in range(n_characters):
 
         for r_obj_ind in range(OBJ_PER_IMG-1):
             r_cls = random.choice(r_clss)
-            r_smp = random.randint(0, len(chars[r_cls]))
+            r_smp = random.randint(0, len(chars[r_cls])-1)
 
             img = chars[r_cls][r_smp]
+            img = crop_char(img)
             count = 0
             while True:
                 scl = random.uniform(CHAR_SCALES[0], CHAR_SCALES[1])
@@ -206,16 +231,13 @@ for char_ind in range(n_characters):
             cover[1] = cover[1] | c[1]
             back[x:x + w, y:y + h] = imgb
             boxes.append((y, x, w, h))
-        # back = noisy('gauss', back)
-        # back = noisy('s&p', back)
 
-        # back = noisy('poisson', back)
-        back = apply_noise(NOISE, back)
+        # back = apply_noise(NOISE, back)
         back = np.expand_dims(back, axis=2)
         back = np.repeat(back, 3, axis=2)
         for box in boxes:
             back = print_bb(back, box)
-        viewer = ImageViewer(back)
-        viewer.show()
+        # viewer = ImageViewer(back)
+        # viewer.show()
         # imgplot = plt.imshow(back)
     # break

@@ -50,8 +50,8 @@ val_transform = transforms.Compose([
 
 n_way=5
 n_support=5
-n_query=2
-emb_size=128
+n_query=10
+emb_size=64
 # Load the sets, and loaders
 trainset = VocLikeProtosDataset(image_dir=cfg.image_dir,
                                 annotation_dir=cfg.annotation_dir,
@@ -76,7 +76,7 @@ valloader = torch.utils.data.DataLoader(valset, batch_size=cfg.batch_size, shuff
 
 # Setup the model
 print('Building model...')
-net = RetinaNet(backbone=cfg.backbone, num_classes=len(cfg.classes), emb_size=128)
+net = RetinaNet(backbone=cfg.backbone, num_classes=len(cfg.classes), emb_size=emb_size)
 
 # If we loading from a checkpoint, load it
 if args.resume:
@@ -100,7 +100,9 @@ criterion = ProtosLoss(n_way=n_way,
                        n_support=n_support,
                        n_query=n_query,
                        emb_size=emb_size)
-optimizer = optim.SGD(net.parameters(), lr=lr, momentum=cfg.momentum, weight_decay=cfg.weight_decay)
+
+# optimizer = optim.SGD(net.parameters(), lr=lr, momentum=cfg.momentum, weight_decay=cfg.weight_decay)
+optimizer = optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, momentum=cfg.momentum, weight_decay=cfg.weight_decay)
 
 # def train(epoch):
 #     print('\nTrain Epoch: %d' % epoch)
@@ -127,9 +129,12 @@ def train(episode):
     net.train()
     # trainset.generate_episode()
     loss = 0
-    clss = []
+    sum_acc = 0
+    clss = [[],[]]
     optimizer.zero_grad()
     criterion.reset()
+    graph_vecs = []
+
     # for sample_idx, (input, loc_target, cls_target) in enumerate(trainset.load_episode()):  # do samples 1 by 1, we will accumulate for loss
     inputs, loc_targets, cls_targets = trainset.load_episode()
     for sid in range(inputs.size()[0]):  # do samples 1 by 1, we will accumulate for loss
@@ -141,27 +146,53 @@ def train(episode):
 
         loc_pred, cls_pred = net(input) # this builds mem on querys as we store for loss tracing the path to the loss?
 
-        loc_loss, cls_loss = criterion(loc_pred, loc_target, cls_pred, cls_target)
-        if sid >= n_way*n_support:
-            loss += loc_loss + cls_loss
-            print('loc_loss: %.3f | cls_loss: %.3f | tot_loss: %.3f' % (loc_loss, cls_loss, loss))
-            print(sid)
+        loc_loss, cls_loss, acc, vectors = criterion(loc_pred, loc_target, cls_pred, cls_target)
+        if vectors is not None:
+            vectors = vectors.cpu().data.numpy().reshape((1,-1))
         else:
-            clss.append(int(sid/n_support))
+            vectors = []
+        if sid >= n_way*n_support:
+            # pos = cls_target > 0  # mask out 'ignore' boxes to not affect
+            # mask = pos.unsqueeze(2).expand_as(cls_pred)
+            # queries = cls_pred[mask].view(-1, emb_size).cpu().data.numpy()
 
+            loss += loc_loss + cls_loss
+            sum_acc += acc
+            # if len(vectors) > 0:
+            #     loss.backward(retain_graph=True)
+            qid = (1+(sid-(n_way*n_support)))
+            print('Q: %02d | loc_loss: %.3f | cls_loss: %.3f | tot_loss: %.3f | acc: %.3f' % (qid, loc_loss, cls_loss, loss/qid, sum_acc/qid))
+            # print(sid)
+            for _ in range(len(vectors)):
+                clss[1].append(int((sid-(n_way*n_support)) / n_query))
+                graph_vecs.append(vectors)
+                # np.stack((graph_vecs, vectors))
+
+        else:
+            for _ in range(len(vectors)):
+                clss[0].append(int(sid/n_support))
+                graph_vecs.append(vectors)
+                # np.stack((graph_vecs, vectors))
+
+
+    loss = loss/len(clss[1]) # avg loss over num queries
     loss.backward()
     nn.utils.clip_grad_norm(net.parameters(), max_norm=1.2)
     optimizer.step()
 
-    sups = criterion.supports.cpu().data.numpy().reshape((n_support*n_way, emb_size))
-    tsne = TSNE(n_components=2, verbose=1, perplexity=40, n_iter=300)
-    tsne_results = tsne.fit_transform(sups)
+    # sups = criterion.supports.cpu().data.numpy().reshape((n_support*n_way, emb_size))
+    tsne = TSNE(n_components=2, verbose=0, perplexity=40, n_iter=300)
+    graph_vecs = np.array(graph_vecs).squeeze()
+    tsne_results = tsne.fit_transform(graph_vecs)
 
     from matplotlib import pyplot as plt
     plt.figure(figsize=(6, 5))
     colors = 'r', 'g', 'b', 'c', 'm', 'y', 'k', 'w', 'orange', 'purple'
-    for i, label in enumerate(clss):
-        plt.scatter(tsne_results[i,0], tsne_results[i,1], c=colors[label], label=label)
+    for i, label in enumerate(clss[0]+clss[1]):
+        if i < len(clss[0]):
+            plt.scatter(tsne_results[i,0], tsne_results[i,1], c=colors[label], label=label)
+        else:
+            plt.scatter(tsne_results[i,0], tsne_results[i,1], facecolors = 'none', edgecolors=colors[label], label=label)
     # plt.legend()
     # plt.show()
     plt.savefig('/media/hayden/Storage21/MODELS/PROTINANET/vis/'+str(episode)+'.png')
@@ -209,5 +240,5 @@ for epoch in range(start_epoch + 1, start_epoch + cfg.num_epochs + 1):
             param_group['lr'] = lr
     train(epoch)
 
-    if cfg.eval_while_training and epoch % cfg.eval_every == 0:
-        val(epoch)
+    # if cfg.eval_while_training and epoch % cfg.eval_every == 0:
+    #     val(epoch)

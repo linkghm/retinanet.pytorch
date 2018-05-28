@@ -39,26 +39,33 @@ class FeaturePyramid(nn.Module):
         super(FeaturePyramid, self).__init__()
 
         self.resnet = resnet
-
+        for param in self.resnet.parameters():
+            param.requires_grad = False
         self.pyramid_transformation_3 = conv1x1(512, 256)
+        # self.pyramid_transformation_3b = conv1x1(256, 256)
         self.pyramid_transformation_4 = conv1x1(1024, 256)
         self.pyramid_transformation_5 = conv1x1(2048, 256)
 
         self.pyramid_transformation_6 = conv3x3(2048, 256, padding=1, stride=2)
+        # self.pyramid_transformation_6b = conv3x3(512, 256, padding=1, stride=2)
         self.pyramid_transformation_7 = conv3x3(256, 256, padding=1, stride=2)
 
         self.upsample_transform_1 = conv3x3(256, 256, padding=1)
         self.upsample_transform_2 = conv3x3(256, 256, padding=1)
+        # self.upsample_transform_3 = conv3x3(128, 256, padding=1)
 
     def forward(self, x):
         _, resnet_feature_3, resnet_feature_4, resnet_feature_5 = self.resnet(x)
 
         pyramid_feature_6 = self.pyramid_transformation_6(resnet_feature_5)
+        # pyramid_feature_6 = self.pyramid_transformation_6b(resnet_feature_5)
         pyramid_feature_7 = self.pyramid_transformation_7(F.relu(pyramid_feature_6))
 
         pyramid_feature_5 = self.pyramid_transformation_5(resnet_feature_5)
+        # pyramid_feature_5 = self.pyramid_transformation_3(resnet_feature_5)
 
         pyramid_feature_4 = self.pyramid_transformation_4(resnet_feature_4)
+        # pyramid_feature_4 = self.pyramid_transformation_3b(resnet_feature_4)
         upsampled_feature_5 = upsample(pyramid_feature_5, pyramid_feature_4)
         pyramid_feature_4 = self.upsample_transform_1(torch.add(upsampled_feature_5, pyramid_feature_4))
         
