@@ -1,6 +1,9 @@
 import os
 import random
+import numpy as np
+from tqdm import tqdm
 from PIL import Image
+from skimage import io, transform
 import xml.etree.ElementTree as ET
 
 import torch
@@ -64,7 +67,8 @@ class VocLikeDataset(Dataset):
 
 
 class VocLikeProtosDataset(Dataset):
-    def __init__(self, image_dir,
+    def __init__(self,
+                 image_dir,
                  annotation_dir,
                  imageset_fn,
                  image_ext,
@@ -229,3 +233,266 @@ class VocLikeProtosDataset(Dataset):
             else:
                 self.filenames.remove(fn)
         return box_dict, classes_samples
+
+
+class OmniglotDetectDataset(Dataset):
+    def __init__(self,
+                 base_dir,
+                 n_way,
+                 n_support,
+                 n_query,
+                 n_objects_p_i,
+                 n_classes_p_i,
+                 encoder,
+                 split="train",
+                 n_classes=10,
+                 transform=None,
+                 val=False):
+        self.n_way = n_way
+        self.n_support = n_support
+        self.n_query = n_query
+        self.split = split
+
+        self.n_classes_p_i = n_classes_p_i
+        self.n_objects_p_i = n_objects_p_i
+        self.img_size = (150, 150)
+        self.char_scales = (.5, 3)
+        self.force_square = True
+
+        self.imgs = self.build_set(base_dir)
+        self.classes = list(range(min(len(self.imgs), n_classes)))
+
+        self.encoder = encoder
+        self.transform = transform
+        self.val = val
+
+    def __getitem__(self, index):
+        image, boxes = self.generate_sample(index)
+        image = Image.fromarray((image*255).astype(dtype=np.uint8))
+        example = {'image': image, 'boxes': boxes}
+        if self.transform:
+            example = self.transform(example)
+        return example
+
+    def __len__(self):
+        return len(self.imgs)
+
+
+    def load_episode(self):
+        classes = random.sample(self.classes, self.n_way)
+
+        indexs = []
+        # desired_classes = []
+        episode_ids_tmp = [random.sample(list(range(len(self.imgs[self.classes.index(cls)]))), self.n_support + self.n_query) for cls in classes]
+        desired_classes_tmp = [[self.classes.index(cls)] * (self.n_support + self.n_query) for cls in classes]
+
+        # order to be [c1s1,c1s2,..,c10s5,c1q1,c1q2,...,c10q20] so can pass all support first so can mean asap
+        for ci in range(self.n_way):
+            indexs+= list(map(list, zip(*[desired_classes_tmp[ci][:self.n_support], episode_ids_tmp[ci][:self.n_support]])))
+            # indexs.append([episode_ids_tmp[ci][:self.n_support], desired_classes_tmp[ci][:self.n_support]])
+        for ci in range(self.n_way):
+            indexs += list(map(list, zip(*[desired_classes_tmp[ci][self.n_support:], episode_ids_tmp[ci][self.n_support:]])))
+            # indexs.append([episode_ids_tmp[ci][self.n_support:], desired_classes_tmp[ci][self.n_support:]])
+
+        episode = [self.__getitem__(id) for id in indexs]
+
+        imgs = [example['image'] for example in episode]
+        boxes = [example['boxes'] for example in episode]
+        labels = [example['labels'] for example in episode]
+        img_sizes = [img.size()[1:] for img in imgs]
+
+        max_h = max([im.size(1) for im in imgs])
+        max_w = max([im.size(2) for im in imgs])
+        num_imgs = len(imgs)
+        inputs = torch.zeros(num_imgs, 3, max_h, max_w)
+
+        loc_targets = []
+        cls_targets = []
+        for i in range(num_imgs):
+            im = imgs[i]
+            imh, imw = im.size(1), im.size(2)
+            inputs[i, :, :imh, :imw] = im
+
+            loc_target, cls_target = self.encoder.encode_protos(boxes[i], labels[i], input_size=(max_w, max_h),
+                                                         desired_label=indexs[i][0])
+            loc_targets.append(loc_target)
+            cls_targets.append(cls_target)
+        if not self.val:
+            return inputs, torch.stack(loc_targets), torch.stack(cls_targets)
+        return inputs, img_sizes, torch.stack(loc_targets), torch.stack(cls_targets)
+
+    def build_set(self, dir):
+        from skimage import io, transform
+        imgs = []
+        with open(os.path.join(dir, "SPLITS/vinyals", self.split + ".txt"), 'r') as f:
+            lines = f.readlines()
+        lines = [line.split("/") for line in lines]
+
+        for si in tqdm(range(len(lines))):
+            alphabet = lines[si][0]
+            character = lines[si][1]
+            rot = int(lines[si][2][3:])
+
+            image_dir = os.path.join(dir, 'IMAGES', alphabet, character)
+
+            characters = []
+            for filename in os.listdir(image_dir):
+                filename = os.path.join(image_dir, filename)
+                img = io.imread(filename)
+                characters.append(transform.rotate(img, rot))
+
+            imgs.append(characters)
+
+        print("Images Loaded.")
+        return imgs
+
+    def apply_noise(self, image, noise_typ='speckle_norm'):
+        if len(image.shape) < 3:
+            image = image.reshape(image.shape[0], image.shape[1], 1)
+        row, col, ch = image.shape
+
+        if noise_typ == "gauss":
+            mean = 0
+            var = 0.1
+            sigma = var ** 0.5
+            gauss = np.random.normal(mean, sigma, (row, col, ch))
+            gauss = gauss.reshape(row, col, ch)
+            noisy = image + gauss
+            return noisy.squeeze()
+        elif noise_typ == "poisson":
+            vals = len(np.unique(image))
+            vals = 2 ** np.ceil(np.log2(vals))
+            noisy = np.random.poisson(image * vals) / float(vals)
+            return noisy.squeeze()
+        elif noise_typ == "speckle":
+            gauss = np.random.randn(row, col, ch)
+            gauss = gauss.reshape(row, col, ch)
+            noisy = image + image * gauss
+            return noisy.squeeze()
+        elif noise_typ == "speckle_norm":
+            gauss = np.random.rand(row, col, ch)
+            gauss = gauss.reshape(row, col, ch)
+            noisy = image * gauss
+            return noisy.squeeze()
+
+    def crop_char(self, img, pad=2):
+        itemindex = np.where(img == 0)
+        min_x = max(min(itemindex[1]) - pad, 0)
+        max_x = min(max(itemindex[1]) + pad, img.shape[1])
+        min_y = max(min(itemindex[0]) - pad, 0)
+        max_y = min(max(itemindex[0]) + pad, img.shape[0])
+        middle_x = int((min_x + max_x) / 2)
+        middle_y = int((min_y + max_y) / 2)
+        w = max_x - min_x
+        h = max_y - min_y
+        size = max(w, h)
+        if self.force_square:
+            l = middle_x - int(size / 2)
+            r = middle_x + int(size / 2)
+            t = middle_y - int(size / 2)
+            b = middle_y + int(size / 2)
+        else:
+            l = middle_x - int(w / 2)
+            r = middle_x + int(w / 2)
+            t = middle_y - int(h / 2)
+            b = middle_y + int(h / 2)
+
+        img = img[t:b, l:r]
+        return img
+
+    def get_rand_pos(self, img_size, char_size, precovered=[set([]), set([])]):
+        # coords of tl placement
+        possible_x = set(range(img_size[1]))
+        possible_y = set(range(img_size[0]))
+
+        # knock out image edges so char doesn't hover off img edge
+        possible_x -= (set(range(img_size[1] - char_size[1], img_size[1])))  # knock out L/R sides
+        possible_y -= (set(range(img_size[0] - char_size[0], img_size[0])))  # knock out T/B sides
+
+        if not possible_x or not possible_y:
+            return None, None, None, None, None
+
+        possible_x = list(possible_x)
+        random.shuffle(possible_x)
+
+        possible_y = list(possible_y)
+        random.shuffle(possible_y)
+
+        # get the random positions and knock out other chars placements coverages
+        x = None
+        y = None
+        for xt in possible_x:
+            if not set(range(xt, xt + char_size[1])) & precovered[1]:
+                # if xt not in precovered[0] and xt + char_size[0] not in precovered[0]:
+                x = xt
+                break
+        for yt in possible_y:
+            if not set(range(yt, yt + char_size[0])) & precovered[0]:
+                # if yt not in precovered[1] and yt + char_size[1] not in precovered[1]:
+                y = yt
+                break
+
+        if not x or not y:
+            return None, None, None, None, None
+
+        padding = 2
+        coverage = [set(range(y - padding, y + char_size[1] + padding)),
+                    set(range(x - padding, x + char_size[0] + padding))]
+
+        return y, x, char_size[0], char_size[1], coverage
+
+    def generate_sample(self, index):
+        char_ind = index[0]
+        samp_ind = index[1]
+
+        back = np.ones(self.img_size)  # *255
+
+        # apply first character we are interested in
+        img = self.imgs[char_ind][samp_ind]
+        back = img
+        boxes = [BoundingBox(1, 1, 1+(img.shape[0]-2), 1+(img.shape[1]-2), img.shape[0], img.shape[0], self.classes.index(char_ind))]
+        # n_characters = len(self.classes)
+        #
+        # img = self.crop_char(img)
+        # for i in range(10000000):
+        #     scl = random.uniform(self.char_scales[0], self.char_scales[1])
+        #     # imgb = transform.rescale(img, scl, mode='constant', cval=1.0)
+        #     imgb = img
+        #     y, x, h, w, cover = self.get_rand_pos(self.img_size, imgb.shape)
+        #     if x:
+        #         break
+        #
+        # assert x
+        #
+        # back[y:y + h, x:x + w] = imgb
+        # boxes = [BoundingBox(x, y, x+w, y+h, self.img_size[1], self.img_size[0], self.classes.index(char_ind))]
+        #
+        # r_clss = random.sample(range(n_characters), (self.n_classes_p_i - 1))
+        # r_clss.append(char_ind)
+        #
+        # for r_obj_ind in range(self.n_objects_p_i - 1):
+        #     r_cls = random.choice(r_clss)
+        #     r_smp = random.randint(0, len(self.imgs[r_cls]) - 1)
+        #
+        #     img = self.imgs[r_cls][r_smp]
+        #     img = self.crop_char(img)
+        #
+        #     for i in range(100):
+        #         scl = random.uniform(self.char_scales[0], self.char_scales[1])
+        #         # imgb = transform.rescale(img, scl, mode='constant', cval=1.0)
+        #         imgb = img
+        #         y, x, h, w, c = self.get_rand_pos(self.img_size, imgb.shape, precovered=cover)
+        #         if x:
+        #             cover[0] = cover[0] | c[0]
+        #             cover[1] = cover[1] | c[1]
+        #             back[y:y + h, x:x + w] = imgb
+        #             boxes.append(BoundingBox(x, y, x+w, y+h, self.img_size[1], self.img_size[0], self.classes.index(r_cls)))
+        #             break
+
+        back = self.apply_noise(back)
+        back = np.expand_dims(back, axis=2)
+        back = np.repeat(back, 3, axis=2)
+        # for box in boxes:
+        #     back = print_bb(back, box)
+
+        return back, boxes

@@ -14,6 +14,15 @@ def classification_layer_init(tensor, pi=0.01):
         classification_layer_init(tensor.data)
     return tensor.fill_(fill_constant)
 
+def embedding_layer_init(tensor, pi=0.01):
+    # self.weight.data.normal_(0, 1)
+    # fill_constant = - math.log((1 - pi) / pi)
+    if isinstance(tensor, Variable):
+        embedding_layer_init(tensor.data)
+    return tensor.log_normal_(0, 3)
+    # return tensor.uniform_(-1,1)
+    # return tensor.uniform_(0,3)
+
 def init_conv_weights(layer):
     nn.init.normal(layer.weight.data, std=0.01)
     nn.init.constant(layer.bias.data, val=0)
@@ -39,15 +48,17 @@ class FeaturePyramid(nn.Module):
         super(FeaturePyramid, self).__init__()
 
         self.resnet = resnet
-        for param in self.resnet.parameters():
-            param.requires_grad = False
+        # for param in self.resnet.parameters():
+        #     param.requires_grad = False
         self.pyramid_transformation_3 = conv1x1(512, 256)
-        # self.pyramid_transformation_3b = conv1x1(256, 256)
+        self.pyramid_transformation_3 = conv1x1(128, 256)
         self.pyramid_transformation_4 = conv1x1(1024, 256)
+        self.pyramid_transformation_4 = conv1x1(256, 256)
         self.pyramid_transformation_5 = conv1x1(2048, 256)
+        self.pyramid_transformation_5 = conv1x1(512, 256)
 
         self.pyramid_transformation_6 = conv3x3(2048, 256, padding=1, stride=2)
-        # self.pyramid_transformation_6b = conv3x3(512, 256, padding=1, stride=2)
+        self.pyramid_transformation_6 = conv3x3(512, 256, padding=1, stride=2)
         self.pyramid_transformation_7 = conv3x3(256, 256, padding=1, stride=2)
 
         self.upsample_transform_1 = conv3x3(256, 256, padding=1)
@@ -77,19 +88,28 @@ class FeaturePyramid(nn.Module):
 
 
 class SubNet(nn.Module):
-    def __init__(self, k, anchors=9, depth=4, activation=F.relu):
+    def __init__(self, k, anchors=9, depth=4, activation=F.relu, embed=False):
         super(SubNet, self).__init__()
         self.anchors = anchors
         self.activation = activation
         self.base = nn.ModuleList([conv3x3(256, 256, padding=1) for _ in range(depth)])
         self.output = nn.Conv2d(256, k * anchors, kernel_size=3, padding=1)
-        classification_layer_init(self.output.weight.data)
+        self.embed =embed
+        if not embed:
+            classification_layer_init(self.output.weight.data)
+        else:
+            embedding_layer_init(self.output.weight.data)
+            # self.em = nn.Embedding(, k)
+        #     #init_conv_weights(self.output)
+
 
     def forward(self, x):
         for layer in self.base:
             x = self.activation(layer(x))
         x = self.output(x)
         x = x.permute(0, 2, 3, 1).contiguous().view(x.size(0), x.size(2) * x.size(3) * self.anchors, -1)
+        # if self.embed:
+        #     x = self.em(x)
         return x
 
 
@@ -102,15 +122,16 @@ class RetinaNet(nn.Module):
         'resnet152': resnet152
     }
 
-    def __init__(self, backbone='resnet101', num_classes=20, pretrained=True, emb_size=None):
+    def __init__(self, backbone='resnet101', num_classes=20, pretrained=False, emb_size=None):
         super(RetinaNet, self).__init__()
         self.resnet = RetinaNet.backbones[backbone](pretrained=pretrained)
         self.feature_pyramid = FeaturePyramid(self.resnet)
         self.subnet_boxes = SubNet(4)
+
         if emb_size is None:
             self.subnet_classes = SubNet(num_classes + 1)
         else:
-            self.subnet_classes = SubNet(emb_size)
+            self.subnet_classes = SubNet(emb_size, anchors=9, depth=4, embed=True)
 
     def forward(self, x):
         pyramid_features = self.feature_pyramid(x)
@@ -120,8 +141,9 @@ class RetinaNet(nn.Module):
 
 
 if __name__ == '__main__':
-    net = RetinaNet().cuda()
+    net = RetinaNet(emb_size=128).cuda()
     x = Variable(torch.rand(1, 3, 864, 1536).cuda())
     for l in net(x):
         print(l.size())
 
+    print(net)

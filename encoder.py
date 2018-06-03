@@ -73,23 +73,37 @@ class DataEncoder:
         else:
             input_size = torch.Tensor(input_size)
 
+        # ignore everything but desired label
+        if desired_label>=0:
+            boxes = boxes.masked_select((labels == desired_label).view(-1, 1).expand(boxes.size(0), boxes.size(1))).view((labels == desired_label).sum(), boxes.size(1))
+            labels = labels.masked_select(labels == desired_label)
+
         anchor_boxes = self.get_anchor_boxes(input_size)
         boxes = change_box_order(boxes, 'xyxy2xywh')
-        boxes = boxes.float()
-        ious = box_iou(anchor_boxes, boxes, order='xywh')
-        max_ious, max_ids = ious.max(1)
+        boxes = boxes.float()  # list of gt boxes
+        ious = box_iou(anchor_boxes, boxes, order='xywh') #(n_anch, n_boxes) ious of boxes with anchors
+        max_ious, max_ids = ious.max(1) # the max iou values and indxs of anchs and boxes per anch, so each indx refers to gt box and label indx
         boxes = boxes[max_ids]
 
         loc_xy = (boxes[:, :2] - anchor_boxes[:, :2]) / anchor_boxes[:, 2:]
         loc_wh = torch.log(boxes[:, 2:] / anchor_boxes[:, 2:])
-        loc_targets = torch.cat([loc_xy, loc_wh], 1)
+        loc_targets = torch.cat([loc_xy, loc_wh], 1) # calculate the movements needed to better align anchor to gt
 
-        cls_targets = 1 + labels[max_ids]
-        cls_targets[max_ious < 0.4] = 0  # set other flag if overlap of anchor with GT is < 40%
+        cls_targets = 1 + labels[max_ids]  # cls_targets (n_anch) containing the labels+1 of the best aligned gt box per anch box
+        cls_targets[max_ious < 1] = -1  # set other flag if overlap of anchor with GT is < 40%
+        # cls_targets[max_ious < 0.4] = 0  # set other flag if overlap of anchor with GT is < 40%
         cls_targets[(max_ious >= 0.4) & (max_ious < 0.5)] = -1  # set ignore flag if overlap is between 40% and 50%
+        # cls_targets[max_ious < 0.1] = 0  # set other flag if overlap of anchor with GT is < 10%
+        # cls_targets[(max_ious >= 0.4) & (max_ious < 0.5)] = -1  # set ignore flag if overlap is between 40% and 50%
 
-        cls_targets[labels[max_ids] != desired_label] = -1  # set ignore flag if this isn't the label we are looking for
+        if desired_label>=0:
+            cls_targets[labels[max_ids] != desired_label] = -1  # set ignore flag if this isn't the label we are looking for
 
+            if cls_targets.max() <= 0:  # no samples so need to take best iou one for desired label to prevent Nans later in pipeline
+                (s_max_ious, s_mi_inds) = torch.sort(max_ious, descending=True)  # sort the max_ious
+                cls_targets[s_mi_inds[0]] = desired_label+1  # assign the ind of that anchor that has highest iou
+
+        assert (cls_targets.max() > 0)
         return loc_targets, cls_targets
 
     def decode(self, loc_preds, cls_preds, input_size):
