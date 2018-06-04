@@ -325,7 +325,7 @@ class OmniglotDetectDataset(Dataset):
 
 
 
-    def load_mem_episode(self):
+    def load_mem_episode(self, e, view=False):
         loc_targetss = []
         cls_targetss = []
         inputss = []
@@ -376,10 +376,33 @@ class OmniglotDetectDataset(Dataset):
             img_sizess.append(img_sizes)
             loc_targetss.append(torch.stack(loc_targets))
             cls_targetss.append(torch.stack(cls_targets))
-        if not self.val:
-            return torch.stack(inputss).transpose(0,1), torch.stack(loc_targetss).transpose(0,1), torch.stack(cls_targetss).transpose(0,1)
 
-        return torch.stack(inputss).transpose(0,1), torch.stack(img_sizess).transpose(0,1), torch.stack(loc_targetss).transpose(0,1), torch.stack(cls_targetss).transpose(0,1)
+        # Stack and transpose so they are shape [eplen, batchsize, c, w, h]
+        inputss = torch.stack(inputss).transpose(0,1)
+        loc_targetss = torch.stack(loc_targetss).transpose(0,1)
+        cls_targetss = torch.stack(cls_targetss).transpose(0,1)
+        # img_sizess = torch.stack(img_sizess).transpose(0,1)
+
+        if view:
+            # from skimage.viewer import ImageViewer
+
+            from PIL import Image
+            for i in range(self.n_way*self.n_support):
+                imgs = inputss.numpy()[i]
+                imgs = np.swapaxes(imgs, 0,1)
+                imgs = imgs.reshape((imgs.shape[0], imgs.shape[1]*imgs.shape[2], imgs.shape[3]))
+                imgs = np.swapaxes(imgs,0,2)
+
+                img = Image.fromarray((imgs * 255).astype(np.uint8))
+                img.save("/media/hayden/Storage21/MODELS/PROTINANET/ins/e"+str(e)+"_"+str(i)+".png")
+
+                # viewer = ImageViewer(imgs)
+                # viewer.show()
+
+        # if not self.val:
+        return inputss, loc_targetss, cls_targetss
+
+        # return inputss, img_sizess, loc_targetss, cls_targetss
 
 
     def build_set(self, dir):

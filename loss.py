@@ -315,10 +315,10 @@ class Memory(nn.Module):
 
         # Parameters
         self.build()
-        self.query_proj = nn.Linear(key_dim, key_dim)
+        # self.query_proj = nn.Linear(key_dim, key_dim)
 
-    def forward(self, x):
-        return self.query_proj(x)
+    # def forward(self, x):
+    #     return self.query_proj(x)
 
     def build(self):
         self.keys = F.normalize(self.random_uniform((self.memory_size, self.key_dim), -0.001, 0.001, cuda=True), dim=1)
@@ -328,7 +328,8 @@ class Memory(nn.Module):
 
     def predict(self, x):
         batch_size, dims = x.size()
-        query = F.normalize(self.query_proj(x), dim=1)
+        # query = F.normalize(self.query_proj(x), dim=1)
+        query = F.normalize(x, dim=1)
 
         # Find the k-nearest neighbors of the query
         scores = torch.matmul(query, torch.t(self.keys_var))
@@ -358,7 +359,7 @@ class Memory(nn.Module):
 		        - A normalized score measuring the similarity between query and nearest neighbor
             loss - average loss for memory module
         """
-        y = cls_targets.max()
+        y, _ = cls_targets.max(1)
         pos = cls_targets > 0
 
         num_pos = pos.float().sum(1) # the number of gt anchors for the class/es we interested in for a single input image
@@ -379,7 +380,8 @@ class Memory(nn.Module):
         samples = samples/num_pos.float().unsqueeze(1).expand_as(samples)  # lastly divide to get the average emb per x
 
         batch_size, dims = samples.size()
-        query = F.normalize(self.query_proj(samples), dim=1)
+        # query = F.normalize(self.query_proj(samples), dim=1)
+        query = F.normalize(samples, dim=1)
         #query = F.normalize(torch.matmul(x, self.query_proj), dim=1)
 
         # Find the k-nearest neighbors of the query
@@ -423,7 +425,7 @@ class Memory(nn.Module):
         self.update(query, y, y_hat, y_hat_indices)
 
 
-        return y_hat, softmax_score, cls_loss, loc_loss
+        return y, y_hat, softmax_score, cls_loss, loc_loss, query
 
     def update(self, query, y, y_hat, y_hat_indices):
         batch_size, dims = query.size()
@@ -458,7 +460,7 @@ class Memory(nn.Module):
             incorrect_query = query.data[incorrect_examples]
             incorrect_values = y.data[incorrect_examples]
 
-            age_with_noise = self.age + self.random_uniform((self.memory_size, 1), -self.age_noise, self.age_noise, cuda=True)
+            age_with_noise = self.age.cuda() + self.random_uniform((self.memory_size, 1), -self.age_noise, self.age_noise, cuda=True)
             topk_values, topk_indices = torch.topk(age_with_noise, incorrect_size, dim=0)
             oldest_indices = torch.squeeze(topk_indices)
 

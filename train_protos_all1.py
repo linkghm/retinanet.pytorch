@@ -168,7 +168,7 @@ def train(episode):
     nn.utils.clip_grad_norm(net.parameters(), max_norm=1.2)
     optimizer.step()
 
-    graph('/media/hayden/Storage21/MODELS/PROTINANET/vis/' + str(episode) + '.png', vectors)
+    graph('/media/hayden/Storage21/MODELS/PROTINANET/vis/proto/' + str(episode) + '.png', vectors)
 
     # train_loss += loss.data[0]
     # print('train_loss: %.3f | avg_loss: %.3f' % (loss.data[0], train_loss / (batch_idx + 1)))

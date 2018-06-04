@@ -54,9 +54,11 @@ n_support = 5
 episode_length = n_way*n_support
 # n_query = 5
 emb_size = 2
-memory_size = 8192
+memory_size = 100  # 8192
 n_episodes = 10
 batch_size = 8
+validation_frequency = 10
+
 # Load the sets, and loaders
 # trainset = VocLikeProtosDataset(image_dir=cfg.image_dir,
 #                                 annotation_dir=cfg.annotation_dir,
@@ -93,7 +95,7 @@ valloader = torch.utils.data.DataLoader(valset, batch_size=cfg.batch_size, shuff
 # Setup the model
 print('Building model...')
 mem = Memory(memory_size, emb_size)
-net = RetinaNet(backbone=cfg.backbone, num_classes=len(cfg.classes), memory=mem)
+net = RetinaNet(backbone=cfg.backbone, num_classes=len(cfg.classes), emb_size=emb_size, memory=True)
 
 # If we loading from a checkpoint, load it
 if args.resume:
@@ -176,22 +178,29 @@ optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=1
 #     # save_checkpoint(train_loss, len(trainloader))
 #     return loss.data[0]
 
-def train(e, cummulative_loss, counter):
+def train(e):
     mem.build()
-    inputs, loc_targets, cls_targets = trainset.load_mem_episode()
 
+    cummulative_loss = [0, 0]
+    counter = 0
+    correct = []
+
+    inputs, loc_targets, cls_targets = trainset.load_mem_episode(e, view=True)
     for s in range(episode_length):  # goes across episode length xx is batch size len
         xx = inputs[s]
+
         optimizer.zero_grad()
         xx_cuda = Variable(xx.cuda())
         loc_preds, cls_preds = net(xx_cuda)  # embed: (batch_size, key_dim)
 
-        yy_hat, softmax_embed, cls_loss, loc_loss = mem.query(loc_preds.cuda(), cls_preds.cuda(),
+        yy, yy_hat, softmax_embed, cls_loss, loc_loss, vectors = mem.query(loc_preds.cuda(), cls_preds.cuda(),
                                                 Variable(loc_targets[s]).cuda(),
                                                 Variable(cls_targets[s]).cuda(),
                                                 predict=False)
         loss = cls_loss + loc_loss
-        cummulative_loss += loss.data[0]
+        cummulative_loss[0] += cls_loss.data[0]
+        cummulative_loss[1] += loc_loss.data[0]
+        correct.append(float(torch.equal(yy_hat.cpu(), torch.unsqueeze(yy.data, dim=1).cpu())))
 
         # if n_other > 0 and other_loss.data > .001:
         #     loss += other_loss
@@ -199,89 +208,109 @@ def train(e, cummulative_loss, counter):
         optimizer.step()
         counter += 1
 
+    graph('/media/hayden/Storage21/MODELS/PROTINANET/vis/mem/' + str(e) + '.png', vectors.data.cpu().numpy(), yy.data.cpu().numpy(), mem)
+    print("episode batch: {0:d} average cls loss: {1:.6f} average loc loss: {2:.6f} : average acc: {3: .6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter)), np.mean(correct)))
+
+    # filter = net.conv1.weight.data.numpy()
+    # (1/(2*(maximum negative value)))*filter+0.5 === you need to normalize the filter before plotting.
+    # filter = (1 / (2 * 3.69201088)) * filter + 0.5  # Normalizing the values to [0,1]
+
     # if e % validation_frequency == 0:
     #     # validation
     #     correct = []
-    #     correct_by_k_shot = dict((k, list()) for k in range(episode_width + 1))
+    #     correct_by_k_shot = dict((k, list()) for k in range(n_way + 1))
     #
-    #     testloader = testset.sample_episode_batch(episode_length, episode_width, batch_size=1, N=50)
+    #     inputs, loc_targets, cls_targets = testset.load_mem_episode()
     #
-    #     for data in testloader:
-    #         # erase memory before validation episode
-    #         mem.build()
+    #     # erase memory before validation episode
+    #     mem.build()
     #
-    #         x, y = data
-    #         y_hat = []
-    #         for xx, yy in zip(x, y):
-    #             xx_cuda, yy_cuda = Variable(xx.cuda()), Variable(yy.cuda())
-    #             query = net(xx_cuda, True)
+    #     y_hat = []
+    #     for s in range(episode_length):
+    #         xx_cuda = Variable(xx.cuda())
+    #         loc_preds, cls_preds = net(xx_cuda)
     #
-    #             yy_hat, embed, loss = mem.query(query, yy_cuda, True)
-    #             y_hat.append(yy_hat)
-    #             correct.append(float(torch.equal(yy_hat.cpu(), torch.unsqueeze(yy, dim=1))))
+    #         yy, yy_hat, embed, cls_loss, loc_loss = mem.query(loc_preds.cuda(), cls_preds.cuda(),
+    #                                                               Variable(loc_targets[s]).cuda(),
+    #                                                               Variable(cls_targets[s]).cuda(),
+    #                                                               predict=True)
+    #         y_hat.append(yy_hat)
+    #         correct.append(float(torch.equal(yy_hat.cpu(), torch.unsqueeze(yy, dim=1))))
     #
-    #         # graph(zp, zq, name='TE_' + str(e) + "_" + str(counter))
+    #     # graph(zp, zq, name='TE_' + str(e) + "_" + str(counter))
     #
-    #         # compute per_shot accuracies
-    #         seen_count = [0 for idx in range(episode_width)]
-    #         # loop over episode steps
-    #         for yy, yy_hat in zip(y, y_hat):
-    #             count = seen_count[yy[0] % episode_width]
-    #             if count < (episode_width + 1):
-    #                 correct_by_k_shot[count].append(float(torch.equal(yy_hat.cpu(), torch.unsqueeze(yy, dim=1))))
-    #             seen_count[yy[0] % episode_width] += 1
+    #     # compute per_shot accuracies
+    #     seen_count = [0 for idx in range(n_way)]
+    #     # loop over episode steps
+    #     for yy, yy_hat in zip(y, y_hat):
+    #         count = seen_count[yy[0] % n_way]
+    #         if count < (n_way + 1):
+    #             correct_by_k_shot[count].append(float(torch.equal(yy_hat.cpu(), torch.unsqueeze(yy, dim=1))))
+    #         seen_count[yy[0] % n_way] += 1
     #
-        # print("episode batch: {0:d} average loss: {1:.6f} average 'other' loss: {2:.6f}".format(e, (
-        # cummulative_loss / (counter)), (cummulative_other_loss / (counter))))
-        # print("validation overall accuracy {0:f}".format(np.mean(correct)))
-        #
-        # for idx in range(episode_width + 1):
-        #     print("{0:d}-shot: {1:.3f}".format(idx, np.mean(correct_by_k_shot[idx])))
-        # cummulative_loss = 0
-        # counter = 0
+    #     # print("episode batch: {0:d} average loss: {1:.6f} average 'other' loss: {2:.6f}".format(e, (
+    #     # cummulative_loss / (counter)), (cummulative_other_loss / (counter))))
+    #     print("validation overall accuracy {0:f}".format(np.mean(correct)))
+    #
+    #     for idx in range(n_way + 1):
+    #         print("{0:d}-shot: {1:.3f}".format(idx, np.mean(correct_by_k_shot[idx])))
+    #     # cummulative_loss = 0
+    #     # counter = 0
+
+def plot_kernels(tensor, num_cols=8):
+    if not tensor.ndim==4:
+        raise Exception("assumes a 4D tensor")
+    if not tensor.shape[-1]==3:
+        raise Exception("last dim needs to be 3 to plot")
+    num_kernels = tensor.shape[0]
+    num_rows = 1+ num_kernels // num_cols
+    fig = plt.figure(figsize=(num_cols,num_rows))
+    for i in range(tensor.shape[0]):
+        ax1 = fig.add_subplot(num_rows,num_cols,i+1)
+        ax1.imshow(tensor[i])
+        ax1.axis('off')
+        ax1.set_xticklabels([])
+        ax1.set_yticklabels([])
+
+    plt.subplots_adjust(wspace=0.1, hspace=0.1)
+    plt.show()
 
 
-def graph(path, vectors):
-    # sups = criterion.supports.cpu().data.numpy().reshape((n_support*n_way, emb_size))
+def graph(path, vectors, labels, mem, mean=True):
+    mks = mem.keys.cpu().numpy()
+    mvs = mem.values.cpu().numpy().squeeze()
 
+    mkms = []
+    for i in range(len(labels)):
+        inds = np.where(mvs == labels[i])
+        mk = mks[tuple(inds)]
+        if mean:
+            mkm = mk.mean(0)
+            # TODO add non mean version and we can plot all the key vectors...
+        mkms.append(mkm)
+    mkms = np.array(mkms)
+
+    vectors = np.concatenate((vectors, mkms))
     # graph_vecs = np.array(graph_vecs).squeeze()
     if vectors.shape[1] > 2:
         try:
             tsne = TSNE(n_components=2, verbose=0, perplexity=40, n_iter=300)
-            tsne_results = tsne.fit_transform(vectors)
+            vectors = tsne.fit_transform(vectors)
         except ValueError:
-            print('h')
-    else:
-        tsne_results = vectors
+            print('Value Error')
 
     from matplotlib import pyplot as plt
     plt.figure(figsize=(6, 5))
     colors = 'r', 'g', 'b', 'c', 'm', 'y', 'k', 'w', 'orange', 'purple'
-    for i, label in enumerate(vectors):
-        if i < n_way * n_support:
-            plt.scatter(tsne_results[i, 0], tsne_results[i, 1], c=colors[int(i / n_support)], label=int(i / n_support))
-        else:
-            plt.scatter(tsne_results[i, 0], tsne_results[i, 1], facecolors='none',
-                        edgecolors=colors[int((i - (n_way * n_support)) / n_query)],
-                        label=int((i - (n_way * n_support)) / n_query))
+
+    for i in range(len(labels)):
+        plt.scatter(vectors[i, 0], vectors[i, 1], c=colors[i], label=i)
+        plt.scatter(vectors[i+len(labels), 0], vectors[i+len(labels), 1], facecolors='none', edgecolors=colors[i], label=i)
     # plt.legend()
     # plt.show()
     plt.savefig(path)
     # plt.savefig('/media/hayden/Storage21/MODELS/PROTINANET/vis/'+str(episode)+'.pdf')
 
-def val(epoch):
-    net.eval()
-    val_loss = 0
-    for batch_idx, (inputs, loc_targets, cls_targets) in enumerate(valloader):
-        inputs = Variable(inputs.cuda())
-        loc_targets = Variable(loc_targets.cuda())
-        cls_targets = Variable(cls_targets.cuda())
-
-        loc_preds, cls_preds = net(inputs)
-        loss = criterion(loc_preds, loc_targets, cls_preds, cls_targets)
-        val_loss += loss.data[0]
-        print('val_loss: %.3f | avg_loss: %.3f' % (loss.data[0], val_loss/(batch_idx+1)))
-    save_checkpoint(val_loss, len(valloader))
 
 def save_checkpoint(loss, n):
     global best_loss
@@ -301,14 +330,12 @@ def save_checkpoint(loss, n):
         best_loss = loss
 
 
-cummulative_loss = 0
-counter = 0
 for epoch in range(start_epoch + 1, start_epoch + cfg.num_epochs + 1):
     if epoch in cfg.lr_decay_epochs:
         lr *= 0.1
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
-    train(epoch, cummulative_loss, counter)
+    train(epoch)
 
     # if cfg.eval_while_training and epoch % cfg.eval_every == 0:
     #     val(epoch)

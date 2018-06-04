@@ -218,7 +218,7 @@ def generate(chars, index, n_classes, n_objects, img_size=(500,500), char_scales
                 boxes.append((x, y, w, h))
                 break
 
-    # back = apply_noise(NOISE, back)
+    back = apply_noise(NOISE, back)
     back = np.expand_dims(back, axis=2)
     back = np.repeat(back, 3, axis=2)
     for box in boxes:
@@ -237,9 +237,9 @@ CHAR_SCALES = (.5,3)
 CHAR_ROT = [0, 90, 180, 270]
 FORCE_SQUARE = False
 
-OBJ_PER_IMG = 1
+OBJ_PER_IMG = 10
 
-CLS_PER_IMG = 1
+CLS_PER_IMG = 4
 # assert CLS_PER_IMG <= OBJ_PER_IMG # TODO Check if this is necesary
 
 chars = load_images('val')
@@ -255,7 +255,16 @@ for char_ind in tqdm(range(n_characters)):
                         img_size=IMG_SIZES[0],
                         char_scales=CHAR_SCALES,
                         force_square=FORCE_SQUARE)
+
+
+
+
+        # img = np.swapaxes(back, 0, 2)
+        img = back
+        img = Image.fromarray((img * 255).astype(np.uint8))
+        img.save("/media/hayden/Storage21/MODELS/PROTINANET/04.png")
+        break
         viewer = ImageViewer(back)
         viewer.show()
         # imgplot = plt.imshow(back)
-    # break
+    break
