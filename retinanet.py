@@ -88,19 +88,22 @@ class FeaturePyramid(nn.Module):
 
 
 class SubNet(nn.Module):
-    def __init__(self, k, anchors=9, depth=4, activation=F.relu, embed=False):
+    def __init__(self, k, anchors=9, depth=4, activation=F.relu, embed=False, memory=None):
         super(SubNet, self).__init__()
         self.anchors = anchors
         self.activation = activation
         self.base = nn.ModuleList([conv3x3(256, 256, padding=1) for _ in range(depth)])
         self.output = nn.Conv2d(256, k * anchors, kernel_size=3, padding=1)
         self.embed =embed
-        if not embed:
+        self.memory = memory
+        if not embed and memory is None:
             classification_layer_init(self.output.weight.data)
-        else:
+
+        elif memory is None:
             embedding_layer_init(self.output.weight.data)
             # self.em = nn.Embedding(, k)
         #     #init_conv_weights(self.output)
+        # else:
 
 
     def forward(self, x):
@@ -108,8 +111,8 @@ class SubNet(nn.Module):
             x = self.activation(layer(x))
         x = self.output(x)
         x = x.permute(0, 2, 3, 1).contiguous().view(x.size(0), x.size(2) * x.size(3) * self.anchors, -1)
-        # if self.embed:
-        #     x = self.em(x)
+        if self.memory is not None:
+            x = self.memory(x)
         return x
 
 
@@ -122,16 +125,18 @@ class RetinaNet(nn.Module):
         'resnet152': resnet152
     }
 
-    def __init__(self, backbone='resnet101', num_classes=20, pretrained=False, emb_size=None):
+    def __init__(self, backbone='resnet101', num_classes=20, pretrained=False, emb_size=None, memory=None):
         super(RetinaNet, self).__init__()
         self.resnet = RetinaNet.backbones[backbone](pretrained=pretrained)
         self.feature_pyramid = FeaturePyramid(self.resnet)
         self.subnet_boxes = SubNet(4)
 
-        if emb_size is None:
+        if emb_size is None and memory is None:
             self.subnet_classes = SubNet(num_classes + 1)
-        else:
+        elif memory is None:
             self.subnet_classes = SubNet(emb_size, anchors=9, depth=4, embed=True)
+        elif emb_size is None:
+            self.subnet_classes = SubNet(memory.key_dim, anchors=9, depth=4, memory=memory)
 
     def forward(self, x):
         pyramid_features = self.feature_pyramid(x)

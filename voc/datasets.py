@@ -238,19 +238,21 @@ class VocLikeProtosDataset(Dataset):
 class OmniglotDetectDataset(Dataset):
     def __init__(self,
                  base_dir,
-                 n_way,
-                 n_support,
-                 n_query,
                  n_objects_p_i,
                  n_classes_p_i,
                  encoder,
+                 n_way,
+                 batch_size=None,
+                 n_support=None,
+                 n_query=None,
                  split="train",
-                 n_classes=10,
+                 n_classes=100,
                  transform=None,
                  val=False):
         self.n_way = n_way
         self.n_support = n_support
         self.n_query = n_query
+        self.batch_size = batch_size
         self.split = split
 
         self.n_classes_p_i = n_classes_p_i
@@ -278,7 +280,7 @@ class OmniglotDetectDataset(Dataset):
         return len(self.imgs)
 
 
-    def load_episode(self):
+    def load_protos_episode(self):
         classes = random.sample(self.classes, self.n_way)
 
         indexs = []
@@ -320,6 +322,65 @@ class OmniglotDetectDataset(Dataset):
         if not self.val:
             return inputs, torch.stack(loc_targets), torch.stack(cls_targets)
         return inputs, img_sizes, torch.stack(loc_targets), torch.stack(cls_targets)
+
+
+
+    def load_mem_episode(self):
+        loc_targetss = []
+        cls_targetss = []
+        inputss = []
+        img_sizess = []
+        avail_classes = set(self.classes)
+        for bi in range(self.batch_size):
+            assert len(avail_classes) > self.n_way  # make sure we have enough classes avail to chose n_way from
+            classes = random.sample(list(avail_classes), self.n_way)
+
+            for cls in classes:
+                avail_classes.remove(cls)
+
+            indexs = []
+            # desired_classes = []
+            episode_ids_tmp = [random.sample(list(range(len(self.imgs[self.classes.index(cls)]))), self.n_support) for cls in classes]
+            desired_classes_tmp = [[self.classes.index(cls)] * self.n_support for cls in classes]
+
+            # order to be [c1s1,c3s1,c2s1,..,c4s5,c1s5,c3s5] so get a sample from all classes before moving onto next support set
+            for si in range(self.n_support):
+                for ci in sorted(list(range(self.n_way)), key=lambda k: random.random()):
+                    indexs.append([desired_classes_tmp[ci][si], episode_ids_tmp[ci][si]])
+
+            episode = [self.__getitem__(id) for id in indexs]
+
+            imgs = [example['image'] for example in episode]
+            boxes = [example['boxes'] for example in episode]
+            labels = [example['labels'] for example in episode]
+            img_sizes = [img.size()[1:] for img in imgs]
+
+            max_h = max([im.size(1) for im in imgs])
+            max_w = max([im.size(2) for im in imgs])
+            num_imgs = len(imgs)
+            inputs = torch.zeros(num_imgs, 3, max_h, max_w)
+
+            loc_targets = []
+            cls_targets = []
+            for i in range(num_imgs):
+                im = imgs[i]
+                imh, imw = im.size(1), im.size(2)
+                inputs[i, :, :imh, :imw] = im
+
+                loc_target, cls_target = self.encoder.encode_protos(boxes[i], labels[i], input_size=(max_w, max_h),
+                                                             desired_label=indexs[i][0])
+                loc_targets.append(loc_target)
+                cls_targets.append(cls_target)
+
+            inputss.append(inputs)
+            img_sizess.append(img_sizes)
+            loc_targetss.append(torch.stack(loc_targets))
+            cls_targetss.append(torch.stack(cls_targets))
+        if not self.val:
+            return torch.stack(inputss).transpose(0,1), torch.stack(loc_targetss).transpose(0,1), torch.stack(cls_targetss).transpose(0,1)
+
+        return torch.stack(inputss).transpose(0,1), torch.stack(img_sizess).transpose(0,1), torch.stack(loc_targetss).transpose(0,1), torch.stack(cls_targetss).transpose(0,1)
+
 
     def build_set(self, dir):
         from skimage import io, transform

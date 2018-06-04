@@ -317,6 +317,9 @@ class Memory(nn.Module):
         self.build()
         self.query_proj = nn.Linear(key_dim, key_dim)
 
+    def forward(self, x):
+        return self.query_proj(x)
+
     def build(self):
         self.keys = F.normalize(self.random_uniform((self.memory_size, self.key_dim), -0.001, 0.001, cuda=True), dim=1)
         self.keys_var = ag.Variable(self.keys, requires_grad=False)
@@ -340,7 +343,8 @@ class Memory(nn.Module):
 
         return y_hat, softmax_score
 
-    def query(self, x, y, predict=False):
+    # def query(self, x, y, predict=False):
+    def query(self, loc_preds, cls_preds, loc_targets, cls_targets, predict=False):
         """
         Compute the nearest neighbor of the input queries.
 
@@ -354,8 +358,28 @@ class Memory(nn.Module):
 		        - A normalized score measuring the similarity between query and nearest neighbor
             loss - average loss for memory module
         """
-        batch_size, dims = x.size()
-        query = F.normalize(self.query_proj(x), dim=1)
+        y = cls_targets.max()
+        pos = cls_targets > 0
+
+        num_pos = pos.float().sum(1) # the number of gt anchors for the class/es we interested in for a single input image
+
+        mask = pos.unsqueeze(2).expand_as(loc_preds)  # mask 'other' and 'ignore' boxes out to not affect
+        masked_loc_preds = loc_preds[mask].view(-1, 4)
+        masked_loc_targets = loc_targets[mask].view(-1, 4)
+        loc_loss = F.smooth_l1_loss(masked_loc_preds, masked_loc_targets, size_average=False)
+        loc_loss = loc_loss/num_pos.sum()
+        # loc_loss.data[loc_loss.data == float("inf")] = 0
+
+        pos_neg = cls_targets > -1  # mask out 'ignore' boxes to not affect
+
+        # mask = pos_neg.unsqueeze(2).expand_as(cls_preds)
+        maskb = pos.unsqueeze(2).expand_as(cls_preds)  # get a 0,1 mask to get the interesting anchors
+        # samples = (cls_preds*mask.float()).data.sum(1)  # multiply mask by input then sum per image x
+        samples = (cls_preds*maskb.float()).sum(1)  # multiply mask by input then sum per image x
+        samples = samples/num_pos.float().unsqueeze(1).expand_as(samples)  # lastly divide to get the average emb per x
+
+        batch_size, dims = samples.size()
+        query = F.normalize(self.query_proj(samples), dim=1)
         #query = F.normalize(torch.matmul(x, self.query_proj), dim=1)
 
         # Find the k-nearest neighbors of the query
@@ -370,7 +394,7 @@ class Memory(nn.Module):
         y_hat_indices = topk_indices[:, 0]
         y_hat = self.values[y_hat_indices]
 
-        loss = None
+        cls_loss = None
         if not predict:
             # Loss Function
             # topk_indices = (batch_size x topk)
@@ -393,13 +417,13 @@ class Memory(nn.Module):
             pos_score = torch.mul(pos_score, torch.unsqueeze(mask, dim=1))
 
             #print(pos_score, neg_score)
-            loss = self.MemoryLoss(pos_score, neg_score, self.margin)
+            cls_loss = self.MemoryLoss(pos_score, neg_score, self.margin)
 
         # Update memory
         self.update(query, y, y_hat, y_hat_indices)
 
 
-        return y_hat, softmax_score, loss
+        return y_hat, softmax_score, cls_loss, loc_loss
 
     def update(self, query, y, y_hat, y_hat_indices):
         batch_size, dims = query.size()
