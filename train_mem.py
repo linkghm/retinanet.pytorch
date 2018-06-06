@@ -50,11 +50,11 @@ val_transform = transforms.Compose([
 ])
 
 n_way = 5
-n_support = 5
+n_support = 5  # max nshot ability
 episode_length = n_way*n_support
 # n_query = 5
-emb_size = 2
-memory_size = 100  # 8192
+emb_size = 128
+memory_size = 2056  # 8192
 n_episodes = 10
 batch_size = 8
 validation_frequency = 10
@@ -179,7 +179,7 @@ optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=1
 #     return loss.data[0]
 
 def train(e):
-    mem.build()
+    # mem.build()
 
     cummulative_loss = [0, 0]
     counter = 0
@@ -188,7 +188,8 @@ def train(e):
     inputs, loc_targets, cls_targets = trainset.load_mem_episode(e, view=True)
     for s in range(episode_length):  # goes across episode length xx is batch size len
         xx = inputs[s]
-
+        # for b in range(batch_size):
+        #     xx[b] = xx[b]*(b/batch_size)
         optimizer.zero_grad()
         xx_cuda = Variable(xx.cuda())
         loc_preds, cls_preds = net(xx_cuda)  # embed: (batch_size, key_dim)
@@ -208,7 +209,9 @@ def train(e):
         optimizer.step()
         counter += 1
 
-    graph('/media/hayden/Storage21/MODELS/PROTINANET/vis/mem/' + str(e) + '.png', vectors.data.cpu().numpy(), yy.data.cpu().numpy(), mem)
+    graph('/media/hayden/Storage21/MODELS/PROTINANET/vis/mem/' + str(e) + '.png',
+          vectors.data.cpu().numpy(), yy.data.cpu().numpy(),
+          mem, mean=False)
     print("episode batch: {0:d} average cls loss: {1:.6f} average loc loss: {2:.6f} : average acc: {3: .6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter)), np.mean(correct)))
 
     # filter = net.conv1.weight.data.numpy()
@@ -281,16 +284,24 @@ def graph(path, vectors, labels, mem, mean=True):
     mvs = mem.values.cpu().numpy().squeeze()
 
     mkms = []
+    clss = []
     for i in range(len(labels)):
         inds = np.where(mvs == labels[i])
         mk = mks[tuple(inds)]
         if mean:
             mkm = mk.mean(0)
-            # TODO add non mean version and we can plot all the key vectors...
-        mkms.append(mkm)
-    mkms = np.array(mkms)
+            mkms.append(mkm)
+            clss.append(i)
+        else:
+            for mki in mk:
+                mkms.append(mki)
+                clss.append(i)
 
-    vectors = np.concatenate((vectors, mkms))
+    mkms = np.array(mkms)
+    mem_len = len(clss)
+    clss += list(range(len(labels)))
+
+    vectors = np.concatenate((mkms, vectors))
     # graph_vecs = np.array(graph_vecs).squeeze()
     if vectors.shape[1] > 2:
         try:
@@ -303,9 +314,11 @@ def graph(path, vectors, labels, mem, mean=True):
     plt.figure(figsize=(6, 5))
     colors = 'r', 'g', 'b', 'c', 'm', 'y', 'k', 'w', 'orange', 'purple'
 
-    for i in range(len(labels)):
-        plt.scatter(vectors[i, 0], vectors[i, 1], c=colors[i], label=i)
-        plt.scatter(vectors[i+len(labels), 0], vectors[i+len(labels), 1], facecolors='none', edgecolors=colors[i], label=i)
+    for i in range(len(clss)):
+        if i >= mem_len:
+            plt.scatter(vectors[i, 0], vectors[i, 1], c=colors[clss[i]], label=clss[i])
+        else:
+            plt.scatter(vectors[i, 0], vectors[i, 1], facecolors='none', edgecolors=colors[clss[i]], label=clss[i])
     # plt.legend()
     # plt.show()
     plt.savefig(path)

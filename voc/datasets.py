@@ -573,9 +573,10 @@ class OmniglotDetectDataset(Dataset):
         #             boxes.append(BoundingBox(x, y, x+w, y+h, self.img_size[1], self.img_size[0], self.classes.index(r_cls)))
         #             break
 
-        back = self.apply_noise(back)
+        # back = self.apply_noise(back)
         back = np.expand_dims(back, axis=2)
         back = np.repeat(back, 3, axis=2)
+        # back = self.apply_noise(back)
         # for box in boxes:
         #     back = print_bb(back, box)
 

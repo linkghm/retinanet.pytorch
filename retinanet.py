@@ -21,8 +21,8 @@ def embedding_layer_init(tensor, pi=0.01):
         embedding_layer_init(tensor.data)
     # return tensor.log_normal_(0, 1)
     # return tensor.uniform_(-1,1)
-    # return tensor.uniform_(0,3)
-    return tensor.fill_(fill_constant)
+    return tensor.uniform_(0,3)
+    # return tensor.fill_(fill_constant)
 
 def init_conv_weights(layer):
     nn.init.normal(layer.weight.data, std=0.01)
@@ -49,8 +49,8 @@ class FeaturePyramid(nn.Module):
         super(FeaturePyramid, self).__init__()
 
         self.resnet = resnet
-        for param in self.resnet.parameters():
-            param.requires_grad = False
+        # for param in self.resnet.parameters():
+        #     param.requires_grad = False
         self.pyramid_transformation_3 = conv1x1(512, 256)
         if backbone == "resnet18":
             self.pyramid_transformation_3 = conv1x1(128, 256)
@@ -97,16 +97,17 @@ class SubNet(nn.Module):
         self.base = nn.ModuleList([conv3x3(256, 256, padding=1) for _ in range(depth)])
         self.output = nn.Conv2d(256, k * anchors, kernel_size=3, padding=1)
         self.embed =embed
-        if memory:
-            self.memory = nn.Dropout(0.3)#nn.Linear(k, k)
+        if embed:#memory:
+            self.memory = nn.Linear(k, k)
+            self.drop = nn.Dropout(0.3)
         else:
             self.memory = None
 
         if not embed and memory is None:
             classification_layer_init(self.output.weight.data)
-        else:
+        # else:
         # elif memory is None:
-            embedding_layer_init(self.output.weight.data)
+        #     embedding_layer_init(self.output.weight.data)
 
             # self.em = nn.Embedding(, k)
         #     #init_conv_weights(self.output)
@@ -118,8 +119,12 @@ class SubNet(nn.Module):
             x = self.activation(layer(x))
         x = self.output(x)
         x = x.permute(0, 2, 3, 1).contiguous().view(x.size(0), x.size(2) * x.size(3) * self.anchors, -1)
-        if self.memory is not None:
-            x = self.memory(x)
+        if self.embed:
+            x = self.drop(x)
+        # if self.memory is not None:
+        #     x = self.memory(x)
+        #     x = self.memory(x)
+        #     x = self.memory(x)
         return x
 
 
@@ -138,10 +143,10 @@ class RetinaNet(nn.Module):
         self.feature_pyramid = FeaturePyramid(self.resnet, backbone)
         self.subnet_boxes = SubNet(4)
 
-        if emb_size is None and memory is None:
+        if emb_size is None and memory is False:
             self.subnet_classes = SubNet(num_classes + 1)
         else:
-            self.subnet_classes = SubNet(emb_size, anchors=9, depth=4, embed=True, memory=memory)
+            self.subnet_classes = SubNet(emb_size, anchors=9, depth=1, embed=True, memory=memory)
 
     def forward(self, x):
         pyramid_features = self.feature_pyramid(x)
