@@ -54,10 +54,12 @@ n_support = 6  # max nshot ability -1
 episode_length = n_way*n_support
 # n_query = 5
 emb_size = 128
-memory_size = 1024  # 8192
-n_episodes = 10
+memory_size = 512 # 1024  # 8192
+# n_episodes = 10
 batch_size = 8
-validation_frequency = 10
+validation_frequency = 25
+delete_mem_every_episode = False
+delete_mem_every_validation = False
 
 # Load the sets, and loaders
 # trainset = VocLikeProtosDataset(image_dir=cfg.image_dir,
@@ -191,7 +193,8 @@ optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=1
 
 def train(e):
     # TODO make sure can learn by deleting mem every episode, it generally can but just slower...
-    # mem.build()
+    if delete_mem_every_episode:
+        mem.build()
 
     cummulative_loss = [0, 0]
     counter = 0
@@ -222,9 +225,9 @@ def train(e):
         optimizer.step()
         counter += 1
 
-    graph('/media/hayden/Storage21/MODELS/PROTINANET/vis/mem/' + str(e) + '.png',
-          vectors.data.cpu().numpy(), yy.data.cpu().numpy(),
-          mem, mean=False)
+    # graph('/media/hayden/Storage21/MODELS/PROTINANET/vis/mem/' + str(e) + '.png',
+    #       vectors.data.cpu().numpy(), yy.data.cpu().numpy(),
+    #       mem, mean=False)
     print("episode batch: {0:d} average cls loss: {1:.6f} average loc loss: {2:.6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter))))
     # print("episode batch: {0:d} average cls loss: {1:.6f} average loc loss: {2:.6f} : average acc: {3: .6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter)), np.mean(correct)))
 
@@ -240,7 +243,8 @@ def train(e):
             inputs, loc_targets, cls_targets = valset.load_mem_episode(e)
 
             # erase memory before validation episode
-            mem.build()
+            if delete_mem_every_validation:
+                mem.build()
 
             y_hat = []
             y = []

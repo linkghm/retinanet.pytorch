@@ -21,8 +21,8 @@ def embedding_layer_init(tensor, pi=0.01):
         embedding_layer_init(tensor.data)
     # return tensor.log_normal_(0, 1)
     # return tensor.uniform_(-1,1)
-    return tensor.uniform_(0,3)
-    # return tensor.fill_(fill_constant)
+    # return tensor.uniform_(0,3)
+    return tensor.fill_(fill_constant)
 
 def init_conv_weights(layer):
     nn.init.normal(layer.weight.data, std=0.01)
@@ -106,7 +106,7 @@ class SubNet(nn.Module):
         if not embed and memory is None:
             classification_layer_init(self.output.weight.data)
         # else:
-        # elif memory is None:
+        # # elif memory is None:
         #     embedding_layer_init(self.output.weight.data)
 
             # self.em = nn.Embedding(, k)
@@ -146,7 +146,7 @@ class RetinaNet(nn.Module):
         if emb_size is None and memory is False:
             self.subnet_classes = SubNet(num_classes + 1)
         else:
-            self.subnet_classes = SubNet(emb_size, anchors=9, depth=4, embed=True, memory=memory)
+            self.subnet_classes = SubNet(emb_size, anchors=9, depth=1, embed=True, memory=memory)
 
     def forward(self, x):
         pyramid_features = self.feature_pyramid(x)
