@@ -133,64 +133,6 @@ cudnn.benchmark = True
 
 optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=1e-4, eps=1e-4)
 
-# def train(epoch):
-#     print('\nTrain Epoch: %d' % epoch)
-#     net.train()
-#     train_loss = 0
-#     for batch_idx, (inputs, loc_targets, cls_targets) in enumerate(trainloader):
-#         inputs = Variable(inputs.cuda())
-#         loc_targets = Variable(loc_targets.cuda())
-#         cls_targets = Variable(cls_targets.cuda())
-#
-#         optimizer.zero_grad()
-#         loc_preds, cls_preds = net(inputs)
-#         loss = criterion(loc_preds, loc_targets, cls_preds, cls_targets)
-#         loss.backward()
-#         nn.utils.clip_grad_norm(net.parameters(), max_norm=1.2)
-#         optimizer.step()
-#
-#         train_loss += loss.data[0]
-#         print('train_loss: %.3f | avg_loss: %.3f' % (loss.data[0], train_loss/(batch_idx+1)))
-#     save_checkpoint(train_loss, len(trainloader))
-
-# def train(episode):
-#     print('\nTrain Episode: %d' % episode)
-#     net.train()
-#     # trainset.generate_episode()
-#     loss = 0
-#     sum_acc = 0
-#     clss = [[],[]]
-#     optimizer.zero_grad()
-#     graph_vecs = []
-#
-#     for episode_idx in range(n_episodes):  # episodes at once
-#         inputs, loc_targets, cls_targets = trainset.load_episode()
-#
-#         torch.cuda.empty_cache()
-#         input = Variable(inputs.cuda())
-#
-#         loc_target = Variable(loc_targets.cuda())
-#         cls_target = Variable(cls_targets.cuda())
-#
-#         loc_pred, cls_pred = net(input) # this builds mem on querys as we store for loss tracing the path to the loss?
-#
-#         loc_loss, cls_loss, acc, vectors = criterion(loc_pred, loc_target, cls_pred, cls_target)
-#
-#         loss += loc_loss + cls_loss  # avg loss over num queries
-#         print('E: %02d | loc_loss: %.3f | cls_loss: %.3f | tot_loss: %.3f | acc: %.3f' % (episode_idx, loc_loss, cls_loss, loss/(episode_idx+1), acc))
-#
-#     loss = loss/n_episodes
-#     loss.backward()
-#     nn.utils.clip_grad_norm(net.parameters(), max_norm=1.2)
-#     optimizer.step()
-#
-#     graph('/media/hayden/Storage21/MODELS/PROTINANET/vis/' + str(episode) + '.png', vectors)
-#
-#     # train_loss += loss.data[0]
-#     # print('train_loss: %.3f | avg_loss: %.3f' % (loss.data[0], train_loss / (batch_idx + 1)))
-#     # save_checkpoint(train_loss, len(trainloader))
-#     return loss.data[0]
-
 def train(e):
     # TODO make sure can learn by deleting mem every episode, it generally can but just slower...
     if delete_mem_every_episode:
@@ -203,8 +145,7 @@ def train(e):
     inputs, loc_targets, cls_targets = trainset.load_mem_episode(e, view=True)
     for s in range(episode_length):  # goes across episode length xx is batch size len
         xx = inputs[s]
-        # for b in range(batch_size):
-        #     xx[b] = xx[b]*(b/batch_size)
+
         optimizer.zero_grad()
         xx_cuda = Variable(xx.cuda())
         loc_preds, cls_preds = net(xx_cuda)  # embed: (batch_size, key_dim)
@@ -225,15 +166,11 @@ def train(e):
         optimizer.step()
         counter += 1
 
-    # graph('/media/hayden/Storage21/MODELS/PROTINANET/vis/mem/' + str(e) + '.png',
-    #       vectors.data.cpu().numpy(), yy.data.cpu().numpy(),
-    #       mem, mean=False)
+    graph('/media/hayden/Storage21/MODELS/PROTINANET/vis/mem/' + str(e) + '.png',
+          vectors.data.cpu().numpy(), yy.data.cpu().numpy(),
+          mem, mean=False)
     print("episode batch: {0:d} average cls loss: {1:.6f} average loc loss: {2:.6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter))))
     # print("episode batch: {0:d} average cls loss: {1:.6f} average loc loss: {2:.6f} : average acc: {3: .6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter)), np.mean(correct)))
-
-    # filter = net.conv1.weight.data.numpy()
-    # (1/(2*(maximum negative value)))*filter+0.5 === you need to normalize the filter before plotting.
-    # filter = (1 / (2 * 3.69201088)) * filter + 0.5  # Normalizing the values to [0,1]
 
     if e % validation_frequency == 0:
         # validation
