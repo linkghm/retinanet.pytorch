@@ -328,11 +328,16 @@ class OmniglotDetectDataset(Dataset):
     def load_mem_episode(self, e, view=False):
         loc_targetss = []
         cls_targetss = []
+        cls_dict = []  # 0 can't exist here as we reserve that for background
         inputss = []
         img_sizess = []
         avail_classes = set(self.classes)
         for bi in range(self.batch_size):
             assert len(avail_classes) > self.n_way  # make sure we have enough classes avail to chose n_way from
+            # this is in place of the orig paper and code which can take same class for different batch breaking the unseen
+            # property of few shot, but its okay as num classes is high compared to nway so random choice of same class is rare
+            # but here instead we assert that the classes must be different
+
             classes = random.sample(list(avail_classes), self.n_way)
 
             for cls in classes:
@@ -367,8 +372,17 @@ class OmniglotDetectDataset(Dataset):
                 imh, imw = im.size(1), im.size(2)
                 inputs[i, :, :imh, :imw] = im
 
-                loc_target, cls_target = self.encoder.encode_protos(boxes[i], labels[i], input_size=(max_w, max_h),
-                                                             desired_label=indexs[i][0])
+                # labels are 1 --> n_way+1
+                # loc_target, cls_target = self.encoder.encode_protos(boxes[i],
+                #                                                     torch.LongTensor([classes.index(int(labels[i])) + (bi*self.n_way)+1]),
+                #                                                     input_size=(max_w, max_h),
+                #                                                     desired_label=classes.index(indexs[i][0]) + (bi*self.n_way)+1)
+
+                # # labels are their original class label
+                loc_target, cls_target = self.encoder.encode_protos(boxes[i],
+                                                                    labels[i],
+                                                                    input_size=(max_w, max_h),
+                                                                    desired_label=indexs[i][0])
                 loc_targets.append(loc_target)
                 cls_targets.append(cls_target)
 

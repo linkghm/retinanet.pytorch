@@ -424,8 +424,8 @@ class Memory(nn.Module):
         # Update memory
         self.update(query, y, y_hat, y_hat_indices)
 
-
         return y, y_hat, softmax_score, cls_loss, loc_loss, query
+
 
     def update(self, query, y, y_hat, y_hat_indices):
         batch_size, dims = query.size()

@@ -146,7 +146,7 @@ class RetinaNet(nn.Module):
         if emb_size is None and memory is False:
             self.subnet_classes = SubNet(num_classes + 1)
         else:
-            self.subnet_classes = SubNet(emb_size, anchors=9, depth=1, embed=True, memory=memory)
+            self.subnet_classes = SubNet(emb_size, anchors=9, depth=4, embed=True, memory=memory)
 
     def forward(self, x):
         pyramid_features = self.feature_pyramid(x)

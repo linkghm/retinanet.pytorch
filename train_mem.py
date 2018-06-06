@@ -50,11 +50,11 @@ val_transform = transforms.Compose([
 ])
 
 n_way = 5
-n_support = 5  # max nshot ability
+n_support = 6  # max nshot ability -1
 episode_length = n_way*n_support
 # n_query = 5
 emb_size = 128
-memory_size = 2056  # 8192
+memory_size = 1024  # 8192
 n_episodes = 10
 batch_size = 8
 validation_frequency = 10
@@ -81,14 +81,25 @@ trainset = OmniglotDetectDataset(base_dir="/media/hayden/Storage21/DATASETS/IMAG
                                  encoder=DataEncoder(),
                                  transform=train_transform)
 
+
+valset = OmniglotDetectDataset(base_dir="/media/hayden/Storage21/DATASETS/IMAGE/OMNIGLOT/",
+                                 split="val",
+                                 n_way=n_way,
+                                 n_support=n_support,
+                                 batch_size=1,
+                                 n_classes_p_i=1,
+                                 n_objects_p_i=1,
+                                 encoder=DataEncoder(),
+                                 transform=train_transform)
+
 # trainset = VocLikeDataset(image_dir=cfg.image_dir, annotation_dir=cfg.annotation_dir, imageset_fn=cfg.train_imageset_fn,
 #                         image_ext=cfg.image_ext, classes=cfg.classes, encoder=DataEncoder(), transform=train_transform)
-valset = VocLikeDataset(image_dir=cfg.image_dir, annotation_dir=cfg.annotation_dir, imageset_fn=cfg.val_imageset_fn,
-                        image_ext=cfg.image_ext, classes=cfg.classes, encoder=DataEncoder(), transform=val_transform)
+# valset = VocLikeDataset(image_dir=cfg.image_dir, annotation_dir=cfg.annotation_dir, imageset_fn=cfg.val_imageset_fn,
+#                         image_ext=cfg.image_ext, classes=cfg.classes, encoder=DataEncoder(), transform=val_transform)
 # trainloader = torch.utils.data.DataLoader(trainset, batch_size=cfg.batch_size, shuffle=True,
 #                                           num_workers=cfg.num_workers, collate_fn=trainset.collate_fn)
-valloader = torch.utils.data.DataLoader(valset, batch_size=cfg.batch_size, shuffle=False,
-                                        num_workers=cfg.num_workers, collate_fn=valset.collate_fn)
+# valloader = torch.utils.data.DataLoader(valset, batch_size=cfg.batch_size, shuffle=False,
+#                                         num_workers=cfg.num_workers, collate_fn=valset.collate_fn)
 
 
 
@@ -179,6 +190,7 @@ optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=1
 #     return loss.data[0]
 
 def train(e):
+    # TODO make sure can learn by deleting mem every episode, it generally can but just slower...
     # mem.build()
 
     cummulative_loss = [0, 0]
@@ -201,7 +213,8 @@ def train(e):
         loss = cls_loss + loc_loss
         cummulative_loss[0] += cls_loss.data[0]
         cummulative_loss[1] += loc_loss.data[0]
-        correct.append(float(torch.equal(yy_hat.cpu(), torch.unsqueeze(yy.data, dim=1).cpu())))
+        # cc = float(torch.equal(yy_hat.cpu(), torch.unsqueeze(yy.data, dim=1).cpu()))
+        # correct.append(float(torch.equal(yy_hat.cpu(), torch.unsqueeze(yy.data, dim=1).cpu())))
 
         # if n_other > 0 and other_loss.data > .001:
         #     loss += other_loss
@@ -212,53 +225,63 @@ def train(e):
     graph('/media/hayden/Storage21/MODELS/PROTINANET/vis/mem/' + str(e) + '.png',
           vectors.data.cpu().numpy(), yy.data.cpu().numpy(),
           mem, mean=False)
-    print("episode batch: {0:d} average cls loss: {1:.6f} average loc loss: {2:.6f} : average acc: {3: .6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter)), np.mean(correct)))
+    print("episode batch: {0:d} average cls loss: {1:.6f} average loc loss: {2:.6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter))))
+    # print("episode batch: {0:d} average cls loss: {1:.6f} average loc loss: {2:.6f} : average acc: {3: .6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter)), np.mean(correct)))
 
     # filter = net.conv1.weight.data.numpy()
     # (1/(2*(maximum negative value)))*filter+0.5 === you need to normalize the filter before plotting.
     # filter = (1 / (2 * 3.69201088)) * filter + 0.5  # Normalizing the values to [0,1]
 
-    # if e % validation_frequency == 0:
-    #     # validation
-    #     correct = []
-    #     correct_by_k_shot = dict((k, list()) for k in range(n_way + 1))
-    #
-    #     inputs, loc_targets, cls_targets = testset.load_mem_episode()
-    #
-    #     # erase memory before validation episode
-    #     mem.build()
-    #
-    #     y_hat = []
-    #     for s in range(episode_length):
-    #         xx_cuda = Variable(xx.cuda())
-    #         loc_preds, cls_preds = net(xx_cuda)
-    #
-    #         yy, yy_hat, embed, cls_loss, loc_loss = mem.query(loc_preds.cuda(), cls_preds.cuda(),
-    #                                                               Variable(loc_targets[s]).cuda(),
-    #                                                               Variable(cls_targets[s]).cuda(),
-    #                                                               predict=True)
-    #         y_hat.append(yy_hat)
-    #         correct.append(float(torch.equal(yy_hat.cpu(), torch.unsqueeze(yy, dim=1))))
-    #
-    #     # graph(zp, zq, name='TE_' + str(e) + "_" + str(counter))
-    #
-    #     # compute per_shot accuracies
-    #     seen_count = [0 for idx in range(n_way)]
-    #     # loop over episode steps
-    #     for yy, yy_hat in zip(y, y_hat):
-    #         count = seen_count[yy[0] % n_way]
-    #         if count < (n_way + 1):
-    #             correct_by_k_shot[count].append(float(torch.equal(yy_hat.cpu(), torch.unsqueeze(yy, dim=1))))
-    #         seen_count[yy[0] % n_way] += 1
-    #
-    #     # print("episode batch: {0:d} average loss: {1:.6f} average 'other' loss: {2:.6f}".format(e, (
-    #     # cummulative_loss / (counter)), (cummulative_other_loss / (counter))))
-    #     print("validation overall accuracy {0:f}".format(np.mean(correct)))
-    #
-    #     for idx in range(n_way + 1):
-    #         print("{0:d}-shot: {1:.3f}".format(idx, np.mean(correct_by_k_shot[idx])))
-    #     # cummulative_loss = 0
-    #     # counter = 0
+    if e % validation_frequency == 0:
+        # validation
+        correct = []
+        correct_by_k_shot = dict((k, list()) for k in range(n_way + 1))
+        for i in range(50):
+            inputs, loc_targets, cls_targets = valset.load_mem_episode(e)
+
+            # erase memory before validation episode
+            mem.build()
+
+            y_hat = []
+            y = []
+            for s in range(episode_length):
+                xx = inputs[s]
+
+                xx_cuda = Variable(xx.cuda())
+                loc_preds, cls_preds = net(xx_cuda)
+
+                yy, yy_hat, embed, cls_loss, loc_loss, vectors = mem.query(loc_preds.cuda(),
+                                                                  cls_preds.cuda(),
+                                                                  Variable(loc_targets[s]).cuda(),
+                                                                  Variable(cls_targets[s]).cuda(),
+                                                                  predict=True)
+                yy = yy.data.cpu()
+                y_hat.append(yy_hat)
+                y.append(yy)
+                correct.append(float(torch.equal(yy_hat.cpu(), torch.unsqueeze(yy, dim=1))))
+
+            # graph(zp, zq, name='TE_' + str(e) + "_" + str(counter))
+
+            # compute per_shot accuracies
+            seen_cls_reg = [int(y[i]) for i in range(n_way)]
+            seen_count = [0 for idx in range(n_way)]
+            # loop over episode steps
+            for yy, yy_hat in zip(y, y_hat):
+                # count = seen_count[yy[0] % n_way]
+                count = seen_count[seen_cls_reg.index(yy[0])]
+                if count < (n_way + 1):
+                    correct_by_k_shot[count].append(float(torch.equal(yy_hat.cpu(), torch.unsqueeze(yy, dim=1))))
+                seen_count[seen_cls_reg.index(yy[0])] += 1
+                # seen_count[(yy[0]-1) % n_way] += 1
+
+        # print("episode batch: {0:d} average loss: {1:.6f} average 'other' loss: {2:.6f}".format(e, (
+        # cummulative_loss / (counter)), (cummulative_other_loss / (counter))))
+        print("validation overall accuracy {0:f}".format(np.mean(correct)))
+
+        for idx in range(n_way + 1):
+            print("{0:d}-shot: {1:.3f}".format(idx, np.mean(correct_by_k_shot[idx])))
+        # cummulative_loss = 0
+        # counter = 0
 
 def plot_kernels(tensor, num_cols=8):
     if not tensor.ndim==4:
