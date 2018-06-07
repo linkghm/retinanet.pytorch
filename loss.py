@@ -367,6 +367,7 @@ class Memory(nn.Module):
         mask = pos.unsqueeze(2).expand_as(loc_preds)  # mask 'other' and 'ignore' boxes out to not affect
         masked_loc_preds = loc_preds[mask].view(-1, 4)
         masked_loc_targets = loc_targets[mask].view(-1, 4)
+        tt = masked_loc_preds.max() # TODO why does the preds.max value jump from a decimal to into the 100's
         loc_loss = F.smooth_l1_loss(masked_loc_preds, masked_loc_targets, size_average=False)
         loc_loss = loc_loss/num_pos.sum()
         # loc_loss.data[loc_loss.data == float("inf")] = 0

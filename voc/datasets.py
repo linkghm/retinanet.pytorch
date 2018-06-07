@@ -12,6 +12,7 @@ from torch.utils.data.dataset import Dataset
 from voc.annotations import AnnotationDir
 from voc.bbox import BoundingBox
 
+random.seed(7)
 
 class VocLikeDataset(Dataset):
     def __init__(self, image_dir, annotation_dir, imageset_fn, image_ext, classes, encoder, transform=None, val=False):
@@ -248,7 +249,8 @@ class OmniglotDetectDataset(Dataset):
                  split="train",
                  n_classes=100,
                  transform=None,
-                 val=False):
+                 val=False,
+                 classification=False):
         self.n_way = n_way
         self.n_support = n_support
         self.n_query = n_query
@@ -267,6 +269,8 @@ class OmniglotDetectDataset(Dataset):
         self.encoder = encoder
         self.transform = transform
         self.val = val
+
+        self.classification = classification
 
     def __getitem__(self, index):
         image, boxes = self.generate_sample(index)
@@ -495,7 +499,9 @@ class OmniglotDetectDataset(Dataset):
             t = middle_y - int(h / 2)
             b = middle_y + int(h / 2)
 
-        img = img[t:b, l:r]
+        imgt = img[t:b, l:r]
+        if imgt.shape[0] > 10 and imgt.shape[1] > 10: # ensures that we actually get an image out
+            img = imgt
         return img
 
     def get_rand_pos(self, img_size, char_size, precovered=[set([]), set([])]):
@@ -547,45 +553,55 @@ class OmniglotDetectDataset(Dataset):
 
         # apply first character we are interested in
         img = self.imgs[char_ind][samp_ind]
-        back = img
-        boxes = [BoundingBox(1, 1, 1+(img.shape[0]-2), 1+(img.shape[1]-2), img.shape[0], img.shape[0], self.classes.index(char_ind))]
-        # n_characters = len(self.classes)
-        #
-        # img = self.crop_char(img)
-        # for i in range(10000000):
-        #     scl = random.uniform(self.char_scales[0], self.char_scales[1])
-        #     # imgb = transform.rescale(img, scl, mode='constant', cval=1.0)
-        #     imgb = img
-        #     y, x, h, w, cover = self.get_rand_pos(self.img_size, imgb.shape)
-        #     if x:
-        #         break
-        #
-        # assert x
-        #
-        # back[y:y + h, x:x + w] = imgb
-        # boxes = [BoundingBox(x, y, x+w, y+h, self.img_size[1], self.img_size[0], self.classes.index(char_ind))]
-        #
-        # r_clss = random.sample(range(n_characters), (self.n_classes_p_i - 1))
-        # r_clss.append(char_ind)
-        #
-        # for r_obj_ind in range(self.n_objects_p_i - 1):
-        #     r_cls = random.choice(r_clss)
-        #     r_smp = random.randint(0, len(self.imgs[r_cls]) - 1)
-        #
-        #     img = self.imgs[r_cls][r_smp]
-        #     img = self.crop_char(img)
-        #
-        #     for i in range(100):
-        #         scl = random.uniform(self.char_scales[0], self.char_scales[1])
-        #         # imgb = transform.rescale(img, scl, mode='constant', cval=1.0)
-        #         imgb = img
-        #         y, x, h, w, c = self.get_rand_pos(self.img_size, imgb.shape, precovered=cover)
-        #         if x:
-        #             cover[0] = cover[0] | c[0]
-        #             cover[1] = cover[1] | c[1]
-        #             back[y:y + h, x:x + w] = imgb
-        #             boxes.append(BoundingBox(x, y, x+w, y+h, self.img_size[1], self.img_size[0], self.classes.index(r_cls)))
-        #             break
+        if self.classification:
+            back = img
+            boxes = [BoundingBox(1, 1, 1+(img.shape[0]-2), 1+(img.shape[1]-2), img.shape[0], img.shape[0], self.classes.index(char_ind))]
+        else:
+            n_characters = len(self.classes)
+
+            img = self.crop_char(img)
+
+            for i in range(10000000):
+
+                scl = random.uniform(self.char_scales[0], self.char_scales[1])
+                imgb = Image.fromarray((img * 255).astype(np.uint8))
+                imgb = imgb.resize((int(scl*img.shape[0]), int(scl*img.shape[1])), Image.ANTIALIAS)
+                imgb = np.array(imgb)/255
+                # imgb = transform.rescale(img, scl, mode='constant', cval=1.0)
+                # imgb = img
+                y, x, h, w, cover = self.get_rand_pos(self.img_size, imgb.shape)
+                if x:
+                    break
+
+            assert x
+
+            back[y:y + h, x:x + w] = imgb
+            boxes = [BoundingBox(x, y, x+w, y+h, self.img_size[1], self.img_size[0], self.classes.index(char_ind))]
+
+            r_clss = random.sample(range(n_characters), (self.n_classes_p_i - 1))
+            r_clss.append(char_ind)
+
+            for r_obj_ind in range(self.n_objects_p_i - 1):
+                r_cls = random.choice(r_clss)
+                r_smp = random.randint(0, len(self.imgs[r_cls]) - 1)
+
+                img = self.imgs[r_cls][r_smp]
+                img = self.crop_char(img)
+
+                for i in range(100):
+                    scl = random.uniform(self.char_scales[0], self.char_scales[1])
+                    imgb = Image.fromarray((img * 255).astype(np.uint8))
+                    imgb = imgb.resize((int(scl * img.shape[0]), int(scl * img.shape[1])), Image.ANTIALIAS)
+                    imgb = np.array(imgb) / 255
+                    # imgb = transform.rescale(img, scl, mode='constant', cval=1.0)
+                    # imgb = img
+                    y, x, h, w, c = self.get_rand_pos(self.img_size, imgb.shape, precovered=cover)
+                    if x:
+                        cover[0] = cover[0] | c[0]
+                        cover[1] = cover[1] | c[1]
+                        back[y:y + h, x:x + w] = imgb
+                        boxes.append(BoundingBox(x, y, x+w, y+h, self.img_size[1], self.img_size[0], self.classes.index(r_cls)))
+                        break
 
         # back = self.apply_noise(back)
         back = np.expand_dims(back, axis=2)

@@ -58,8 +58,8 @@ memory_size = 512 # 1024  # 8192
 # n_episodes = 10
 batch_size = 8
 validation_frequency = 25
-delete_mem_every_episode = False
-delete_mem_every_validation = False
+delete_mem_every_episode = True
+delete_mem_every_validation = True
 
 # Load the sets, and loaders
 # trainset = VocLikeProtosDataset(image_dir=cfg.image_dir,
@@ -81,7 +81,8 @@ trainset = OmniglotDetectDataset(base_dir="/media/hayden/Storage21/DATASETS/IMAG
                                  n_classes_p_i=1,
                                  n_objects_p_i=1,
                                  encoder=DataEncoder(),
-                                 transform=train_transform)
+                                 transform=train_transform,
+                                 classification=True)
 
 
 valset = OmniglotDetectDataset(base_dir="/media/hayden/Storage21/DATASETS/IMAGE/OMNIGLOT/",
@@ -92,7 +93,8 @@ valset = OmniglotDetectDataset(base_dir="/media/hayden/Storage21/DATASETS/IMAGE/
                                  n_classes_p_i=1,
                                  n_objects_p_i=1,
                                  encoder=DataEncoder(),
-                                 transform=train_transform)
+                                 transform=train_transform,
+                                 classification=True)
 
 # trainset = VocLikeDataset(image_dir=cfg.image_dir, annotation_dir=cfg.annotation_dir, imageset_fn=cfg.train_imageset_fn,
 #                         image_ext=cfg.image_ext, classes=cfg.classes, encoder=DataEncoder(), transform=train_transform)
@@ -276,7 +278,8 @@ def graph(path, vectors, labels, mem, mean=True):
 
     from matplotlib import pyplot as plt
     plt.figure(figsize=(6, 5))
-    colors = 'r', 'g', 'b', 'c', 'm', 'y', 'k', 'w', 'orange', 'purple'
+    colors = 'r', 'g', 'b', 'c', 'm', 'y', 'k', 'w', 'orange', 'purple',\
+             'r', 'g', 'b', 'c', 'm', 'y', 'k', 'w', 'orange', 'purple'
 
     for i in range(len(clss)):
         if i >= mem_len:

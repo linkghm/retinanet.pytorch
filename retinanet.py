@@ -119,8 +119,8 @@ class SubNet(nn.Module):
             x = self.activation(layer(x))
         x = self.output(x)
         x = x.permute(0, 2, 3, 1).contiguous().view(x.size(0), x.size(2) * x.size(3) * self.anchors, -1)
-        if self.embed:
-            x = self.drop(x)
+        # if self.embed:
+        #     x = self.drop(x)
         # if self.memory is not None:
         #     x = self.memory(x)
         #     x = self.memory(x)
