@@ -12,8 +12,6 @@ from torch.utils.data.dataset import Dataset
 from voc.annotations import AnnotationDir
 from voc.bbox import BoundingBox
 
-random.seed(7)
-
 class VocLikeDataset(Dataset):
     def __init__(self, image_dir, annotation_dir, imageset_fn, image_ext, classes, encoder, transform=None, val=False):
         self.image_dir_path = image_dir
@@ -247,7 +245,7 @@ class OmniglotDetectDataset(Dataset):
                  n_support=None,
                  n_query=None,
                  split="train",
-                 n_classes=100,
+                 n_classes=500,
                  transform=None,
                  val=False,
                  classification=False):
@@ -411,9 +409,11 @@ class OmniglotDetectDataset(Dataset):
                 imgs = imgs.reshape((imgs.shape[0], imgs.shape[1]*imgs.shape[2], imgs.shape[3]))
                 imgs = np.swapaxes(imgs,0,2)
 
+                for j in range(self.batch_size):
+                    imgs[:,(imw*j+imw-1):(imw*j+imw+1),:] = 0
                 img = Image.fromarray((imgs * 255).astype(np.uint8))
                 img.save("/media/hayden/Storage21/MODELS/PROTINANET/ins/e"+str(e)+"_"+str(i)+".png")
-
+                break
                 # viewer = ImageViewer(imgs)
                 # viewer.show()
 

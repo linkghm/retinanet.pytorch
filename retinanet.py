@@ -99,7 +99,7 @@ class SubNet(nn.Module):
         self.embed =embed
         if embed:#memory:
             self.memory = nn.Linear(k, k)
-            self.drop = nn.Dropout(0.3)
+            self.drop = nn.Dropout(0.2)
         else:
             self.memory = None
 

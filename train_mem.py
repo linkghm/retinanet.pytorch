@@ -49,14 +49,14 @@ val_transform = transforms.Compose([
     transforms.Normalize(cfg.mean, cfg.std)
 ])
 
-n_way = 5
+n_way = 10
 n_support = 6  # max nshot ability -1
 episode_length = n_way*n_support
 # n_query = 5
 emb_size = 128
 memory_size = 512 # 1024  # 8192
 # n_episodes = 10
-batch_size = 8
+batch_size = 16
 validation_frequency = 25
 delete_mem_every_episode = True
 delete_mem_every_validation = True
@@ -74,7 +74,7 @@ delete_mem_every_validation = True
 #                                 transform=train_transform)
 
 trainset = OmniglotDetectDataset(base_dir="/media/hayden/Storage21/DATASETS/IMAGE/OMNIGLOT/",
-                                 split="val",
+                                 split="train",
                                  n_way=n_way,
                                  n_support=n_support,
                                  batch_size=batch_size,
@@ -82,7 +82,7 @@ trainset = OmniglotDetectDataset(base_dir="/media/hayden/Storage21/DATASETS/IMAG
                                  n_objects_p_i=1,
                                  encoder=DataEncoder(),
                                  transform=train_transform,
-                                 classification=True)
+                                 classification=False)
 
 
 valset = OmniglotDetectDataset(base_dir="/media/hayden/Storage21/DATASETS/IMAGE/OMNIGLOT/",
@@ -94,7 +94,7 @@ valset = OmniglotDetectDataset(base_dir="/media/hayden/Storage21/DATASETS/IMAGE/
                                  n_objects_p_i=1,
                                  encoder=DataEncoder(),
                                  transform=train_transform,
-                                 classification=True)
+                                 classification=False)
 
 # trainset = VocLikeDataset(image_dir=cfg.image_dir, annotation_dir=cfg.annotation_dir, imageset_fn=cfg.train_imageset_fn,
 #                         image_ext=cfg.image_ext, classes=cfg.classes, encoder=DataEncoder(), transform=train_transform)
@@ -144,6 +144,9 @@ def train(e):
     counter = 0
     correct = []
 
+    vectors = []
+    vectors_labels = []
+
     inputs, loc_targets, cls_targets = trainset.load_mem_episode(e, view=True)
     for s in range(episode_length):  # goes across episode length xx is batch size len
         xx = inputs[s]
@@ -152,13 +155,16 @@ def train(e):
         xx_cuda = Variable(xx.cuda())
         loc_preds, cls_preds = net(xx_cuda)  # embed: (batch_size, key_dim)
 
-        yy, yy_hat, softmax_embed, cls_loss, loc_loss, vectors = mem.query(loc_preds.cuda(), cls_preds.cuda(),
+        yy, yy_hat, softmax_embed, cls_loss, loc_loss, vecs = mem.query(loc_preds.cuda(), cls_preds.cuda(),
                                                 Variable(loc_targets[s]).cuda(),
                                                 Variable(cls_targets[s]).cuda(),
                                                 predict=False)
         loss = cls_loss + loc_loss
         cummulative_loss[0] += cls_loss.data[0]
         cummulative_loss[1] += loc_loss.data[0]
+        vectors.append(vecs.data.cpu().numpy()[0])
+        vectors_labels.append(yy.data.cpu().numpy()[0])
+
         # cc = float(torch.equal(yy_hat.cpu(), torch.unsqueeze(yy.data, dim=1).cpu()))
         # correct.append(float(torch.equal(yy_hat.cpu(), torch.unsqueeze(yy.data, dim=1).cpu())))
 
@@ -169,9 +175,10 @@ def train(e):
         counter += 1
 
     graph('/media/hayden/Storage21/MODELS/PROTINANET/vis/mem/' + str(e) + '.png',
-          vectors.data.cpu().numpy(), yy.data.cpu().numpy(),
+          vectors, vectors_labels,
           mem, mean=False)
-    print("episode batch: {0:d} average cls loss: {1:.6f} average loc loss: {2:.6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter))))
+    # print("episode batch: {0:d} average cls loss: {1:.6f} average loc loss: {2:.6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter))))
+    print("{0:d}\t{1:.6f}\t{2:.6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter))))
     # print("episode batch: {0:d} average cls loss: {1:.6f} average loc loss: {2:.6f} : average acc: {3: .6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter)), np.mean(correct)))
 
     if e % validation_frequency == 0:
@@ -219,10 +226,10 @@ def train(e):
 
         # print("episode batch: {0:d} average loss: {1:.6f} average 'other' loss: {2:.6f}".format(e, (
         # cummulative_loss / (counter)), (cummulative_other_loss / (counter))))
-        print("validation overall accuracy {0:f}".format(np.mean(correct)))
+        print("validation overall accuracy\t{0:f}".format(np.mean(correct)))
 
-        for idx in range(n_way + 1):
-            print("{0:d}-shot: {1:.3f}".format(idx, np.mean(correct_by_k_shot[idx])))
+        for idx in range(n_support):
+            print("{0:d}-shot:\t{1:.3f}".format(idx, np.mean(correct_by_k_shot[idx])))
         # cummulative_loss = 0
         # counter = 0
 
@@ -249,10 +256,12 @@ def graph(path, vectors, labels, mem, mean=True):
     mks = mem.keys.cpu().numpy()
     mvs = mem.values.cpu().numpy().squeeze()
 
+    clss_d = list(set(labels))
+
     mkms = []
     clss = []
-    for i in range(len(labels)):
-        inds = np.where(mvs == labels[i])
+    for i in range(len(clss_d)):
+        inds = np.where(mvs == clss_d[i])
         mk = mks[tuple(inds)]
         if mean:
             mkm = mk.mean(0)
@@ -265,7 +274,8 @@ def graph(path, vectors, labels, mem, mean=True):
 
     mkms = np.array(mkms)
     mem_len = len(clss)
-    clss += list(range(len(labels)))
+    for i in range(len(labels)):
+        clss.append(clss_d.index(labels[i]))
 
     vectors = np.concatenate((mkms, vectors))
     # graph_vecs = np.array(graph_vecs).squeeze()

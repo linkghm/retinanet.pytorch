@@ -18,11 +18,11 @@ scale = None
 batch_size = 1
 lr = 0.01
 # lr = 0.001
-momentum = 0.9
+momentum = 0.8
 # momentum = 0.5
 weight_decay = 1e-4
 num_epochs = 1000
-lr_decay_epochs = [83, 110]
+lr_decay_epochs = [1000]#[83, 110]
 num_workers = 8
 
 eval_while_training = True

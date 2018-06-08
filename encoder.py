@@ -91,6 +91,7 @@ class DataEncoder:
 
         cls_targets = 1 + labels[max_ids]  # cls_targets (n_anch) containing the labels+1 of the best aligned gt box per anch box
         cls_targets[max_ious < 1] = -1  # force only one gt anchor
+        # cls_targets[max_ious < .95] = -1  # force very close to 1 one anchor, only very high overlaps
         # cls_targets[max_ious < 0.4] = 0  # set other flag if overlap of anchor with GT is < 40%
         cls_targets[(max_ious >= 0.4) & (max_ious < 0.5)] = -1  # set ignore flag if overlap is between 40% and 50%
         # cls_targets[max_ious < 0.1] = 0  # set other flag if overlap of anchor with GT is < 10%
