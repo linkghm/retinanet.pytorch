@@ -1,7 +1,5 @@
 exp_id = 1
 
-experiment_paths = ""
-
 backbones = ['resnet18']#, 'resnet34']
 n_ways = [10, 5, 20]
 n_supports = [4, 8]
