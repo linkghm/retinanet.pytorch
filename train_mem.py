@@ -19,15 +19,30 @@ from loss import Memory
 from retinanet import RetinaNet
 from voc.datasets import VocLikeDataset, VocLikeProtosDataset, OmniglotDetectDataset
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='PyTorch RetinaNet Training')
+    parser.add_argument('--exp', required=True, help='experiment name', default='voc')
+    parser.add_argument('--log', required=True, help='path to log', default='voc')
+    parser.add_argument('--nway', required=False, help='n_way', default=10, type=int)
+    parser.add_argument('--nsup', required=False, help='n_support', default=6, type=int)
+    parser.add_argument('--esize', required=False, help='embedding size', default=128, type=int)
+    parser.add_argument('--msize', required=False, help='memory size', default=512, type=int)
+    parser.add_argument('--bsize', required=False, help='batch size', default=16, type=int)
+    parser.add_argument('--backbone', required=False, help='what backbone to use', default='resnet18')
+    parser.add_argument('--del_mem', required=False, help='delete memory after every epoch', default=True)
+    parser.add_argument('--emb_depth', required=False, help='how many conv layers to put in subnet', default=1, type=int)
+    parser.add_argument('--fc_size', required=False, help='how many fc layers to put on end of subnet', default=0, type=int)
+    parser.add_argument('--dropout', required=False, help='dropout value for cls subnet', default=0.0, type=float)
+    parser.add_argument('--val_freq', required=False, help='how often to calc validation accuracy', default=20, type=int)
+    parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
+    args = parser.parse_args()
+    return args
 
-parser = argparse.ArgumentParser(description='PyTorch RetinaNet Training')
-parser.add_argument('--exp', required=True, help='experiment name')
-parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
-args = parser.parse_args()
+args = parse_args()
 
 # Load the config file params from the exps directory specified in args
 sys.path.insert(0, os.path.join('exps', args.exp))
-import config as cfg
+import exps.voc.config as cfg
 
 # Check for Cuda
 assert torch.cuda.is_available(), 'Error: CUDA not found!'
@@ -49,17 +64,22 @@ val_transform = transforms.Compose([
     transforms.Normalize(cfg.mean, cfg.std)
 ])
 
-n_way = 10
-n_support = 6  # max nshot ability -1
+n_way = args.nway
+n_support = args.nsup  # max nshot ability -1
 episode_length = n_way*n_support
 # n_query = 5
-emb_size = 128
-memory_size = 512 # 1024  # 8192
+emb_size = args.esize
+memory_size = args.msize #512 # 1024  # 8192
 # n_episodes = 10
-batch_size = 16
-validation_frequency = 25
-delete_mem_every_episode = True
+batch_size = args.bsize
+validation_frequency = args.val_freq
+delete_mem_every_episode = args.del_mem
 delete_mem_every_validation = True
+log_dir = args.log
+
+emb_depth =args.emb_depth
+fc_size = args.fc_size
+dropout = args.dropout
 
 # Load the sets, and loaders
 # trainset = VocLikeProtosDataset(image_dir=cfg.image_dir,
@@ -110,7 +130,7 @@ valset = OmniglotDetectDataset(base_dir="/media/hayden/Storage21/DATASETS/IMAGE/
 # Setup the model
 print('Building model...')
 mem = Memory(memory_size, emb_size)
-net = RetinaNet(backbone=cfg.backbone, num_classes=len(cfg.classes), emb_size=emb_size, memory=True)
+net = RetinaNet(backbone=args.backbone, num_classes=len(cfg.classes), emb_size=emb_size, memory=True, emb_depth=emb_depth, dropout=dropout, fc_size=fc_size)
 
 # If we loading from a checkpoint, load it
 if args.resume:
@@ -135,6 +155,30 @@ cudnn.benchmark = True
 
 optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=1e-4, eps=1e-4)
 
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
+with open(os.path.join(log_dir, "log-settings.txt"), 'w') as l:
+    l.write(log_dir+"\n")
+    l.write("backbone:\t"+args.backbone+"\n")
+    l.write("n_way:\t"+str(n_way)+"\n")
+    l.write("n_sup:\t"+str(n_support)+"\n")
+    l.write("ep len:\t"+str(episode_length)+"\n")
+    l.write("e_size:\t"+str(emb_size)+"\n")
+    l.write("m_size:\t"+str(memory_size)+"\n")
+    l.write("b_size:\t"+str(batch_size)+"\n")
+    l.write("del_mem:\t"+str(delete_mem_every_episode)+"\n")
+    l.write("e_depth:\t"+str(emb_depth)+"\n")
+    l.write("fc_size:\t"+str(fc_size)+"\n")
+    l.write("dropout:\t"+str(dropout)+"\n")
+
+save_str = "shot:"
+for idx in range(n_support):
+    save_str += "\t{0:d}".format(idx)
+
+with open(os.path.join(log_dir, "log-val-shots.txt"), 'a') as l:
+    l.write(save_str + "\n")
+
 def train(e):
     # TODO make sure can learn by deleting mem every episode, it generally can but just slower...
     if delete_mem_every_episode:
@@ -147,7 +191,7 @@ def train(e):
     vectors = []
     vectors_labels = []
 
-    inputs, loc_targets, cls_targets = trainset.load_mem_episode(e, view=True)
+    inputs, loc_targets, cls_targets = trainset.load_mem_episode(e, view=False)
     for s in range(episode_length):  # goes across episode length xx is batch size len
         xx = inputs[s]
 
@@ -174,10 +218,15 @@ def train(e):
         optimizer.step()
         counter += 1
 
-    graph('/media/hayden/Storage21/MODELS/PROTINANET/vis/mem/' + str(e) + '.png',
+    # graph('/media/hayden/Storage21/MODELS/PROTINANET/vis/mem/' + str(e) + '.png',
+    if not os.path.exists(log_dir + '/emb_graphs_train/'):
+        os.makedirs(log_dir + '/emb_graphs_train/')
+    graph(log_dir + '/emb_graphs_train/' + str(e) + '.png',
           vectors, vectors_labels,
           mem, mean=False)
     # print("episode batch: {0:d} average cls loss: {1:.6f} average loc loss: {2:.6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter))))
+    with open(os.path.join(log_dir, "log-train.txt"), 'a') as l:
+        l.write("{0:d}\t{1:.6f}\t{2:.6f}\n".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter))))
     print("{0:d}\t{1:.6f}\t{2:.6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter))))
     # print("episode batch: {0:d} average cls loss: {1:.6f} average loc loss: {2:.6f} : average acc: {3: .6f}".format(e, (cummulative_loss[0] / (counter)), (cummulative_loss[1] / (counter)), np.mean(correct)))
 
@@ -226,10 +275,17 @@ def train(e):
 
         # print("episode batch: {0:d} average loss: {1:.6f} average 'other' loss: {2:.6f}".format(e, (
         # cummulative_loss / (counter)), (cummulative_other_loss / (counter))))
-        print("validation overall accuracy\t{0:f}".format(np.mean(correct)))
+        print("{0:d}\tvalidation overall accuracy\t{1:f}".format(e, np.mean(correct)))
+        with open(os.path.join(log_dir, "log-val-overall.txt"), 'a') as l:
+            l.write("{0:d}\t{1:f}\n".format(e, np.mean(correct)))
 
+        save_str = str(e)
         for idx in range(n_support):
-            print("{0:d}-shot:\t{1:.3f}".format(idx, np.mean(correct_by_k_shot[idx])))
+            print("\t{0:d}-shot:\t{1:.3f}".format(idx, np.mean(correct_by_k_shot[idx])))
+            save_str += "\t{0:.3f}".format(np.mean(correct_by_k_shot[idx]))
+
+        with open(os.path.join(log_dir, "log-val-shots.txt"), 'a') as l:
+            l.write(save_str+"\n")
         # cummulative_loss = 0
         # counter = 0
 
